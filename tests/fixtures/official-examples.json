@@ -1,0 +1,178 @@
+{
+  "source": "https://fountain.io/syntax/",
+  "examples": [
+    {
+      "section": "Scene Headings",
+      "text": "지문\n\nSTEEL\n대사\n\n.장소\n\n지문"
+    },
+    {
+      "section": "Scene Headings",
+      "text": "EXT. PLACE - NIGHT\n\n...지문"
+    },
+    {
+      "section": "Scene Headings",
+      "text": "ext. place - day"
+    },
+    {
+      "section": "Scene Headings",
+      "text": "INT\nEXT\nEST\nINT./EXT\nINT/EXT\nI/E"
+    },
+    {
+      "section": "Scene Headings",
+      "text": "INT. PLACE - DAY #1#\nINT. PLACE - DAY #1A#\nINT. PLACE - DAY #1a#\nINT. PLACE - DAY #A1#\nINT. PLACE - DAY #I-1-A#\nINT. PLACE - DAY #1.#\nINT. PLACE - DAY #110A#"
+    },
+    {
+      "section": "Action",
+      "text": "지문 하나\n\n지문 둘\n여러 줄\n\n지문 셋"
+    },
+    {
+      "section": "Action",
+      "text": "지문\n\n    Scott --\n    테스트\n\n다른 지문"
+    },
+    {
+      "section": "Character",
+      "text": "STEEL\n대사"
+    },
+    {
+      "section": "Character",
+      "text": "MOM (O. S.)\n대사\n\nHANS (on the radio)\n다른 대사"
+    },
+    {
+      "section": "Character",
+      "text": "@McCLANE\n대사"
+    },
+    {
+      "section": "Dialogue",
+      "text": "SANBORN\n대사"
+    },
+    {
+      "section": "Dialogue",
+      "text": "DAN\n대사\n_강조_"
+    },
+    {
+      "section": "Parenthetical",
+      "text": "STEEL\n(지시)\n대사"
+    },
+    {
+      "section": "Dual Dialogue",
+      "text": "BRICK\n대사\n\nSTEEL ^\n동시 대사"
+    },
+    {
+      "section": "Lyrics",
+      "text": "~노래 한 줄\n~노래 두 줄"
+    },
+    {
+      "section": "Transition",
+      "text": "지문\n\nCUT TO:\n\nEXT. PLACE - DAY"
+    },
+    {
+      "section": "Transition",
+      "text": "지문\n\n>전환"
+    },
+    {
+      "section": "Centered Text",
+      "text": ">끝<"
+    },
+    {
+      "section": "Centered Text",
+      "text": "> 끝 <"
+    },
+    {
+      "section": "Emphasis",
+      "text": "*기울임*\n**굵게**\n***둘 다***\n_밑줄_"
+    },
+    {
+      "section": "Emphasis",
+      "text": "_바깥 *안쪽* 내용_"
+    },
+    {
+      "section": "Emphasis",
+      "text": "입력: **\\*9765\\***"
+    },
+    {
+      "section": "Emphasis",
+      "text": "번호 *69 그리고 *23 끝."
+    },
+    {
+      "section": "Emphasis",
+      "text": "번호 *69 그리고 23* 끝."
+    },
+    {
+      "section": "Emphasis",
+      "text": "번호 *69 그리고 23\\* 끝."
+    },
+    {
+      "section": "Emphasis",
+      "text": "첫 줄 *강조\n\n새 문단*"
+    },
+    {
+      "section": "Title Page",
+      "text": "Title:\n    _**제목**_\n    두 번째 줄\nCredit: 각본\nAuthor: 작가\nSource: 원작\nDraft date: 2026\nContact:\n    연락처"
+    },
+    {
+      "section": "Title Page",
+      "text": "Draft date: 2026"
+    },
+    {
+      "section": "Page Breaks",
+      "text": "지문\n\n===\n\n지문"
+    },
+    {
+      "section": "Line Breaks",
+      "text": "첫 문단\n\n둘째 문단\n여러 줄\n\n셋째 문단"
+    },
+    {
+      "section": "Line Breaks",
+      "text": "INT. PLACE - NIGHT\n\n지문\n\nLOOKING…\n대사\n\n지문"
+    },
+    {
+      "section": "Line Breaks",
+      "text": "INT. PLACE - NIGHT\n\n지문\n\n!LOOKING…\n지문\n\n지문"
+    },
+    {
+      "section": "Line Breaks",
+      "text": "DEALER\n첫 줄\n둘째 줄\n\nMONKEY\n대사"
+    },
+    {
+      "section": "Line Breaks",
+      "text": "DEALER\n대사\n\n지문\n\nMONKEY\n대사"
+    },
+    {
+      "section": "Line Breaks",
+      "text": "DEALER\n대사\n{two spaces}\n계속 대사\n\nMONKEY\n대사"
+    },
+    {
+      "section": "Indenting",
+      "text": "CUT TO:\n\nINT. PLACE - DAY\n\n지문\n\nSTEEL\n대사\n\nBRICK\n(지시)\n대사"
+    },
+    {
+      "section": "Notes",
+      "text": "INT. PLACE - DAY\n\n지문 [[메모]] 내용\n\n[[독립 메모]]\n\nJACK\n대사"
+    },
+    {
+      "section": "Notes",
+      "text": "지문 [[여러 줄\n메모\n{two spaces}\n계속 메모]] 내용"
+    },
+    {
+      "section": "Boneyard",
+      "text": "COGNITO\n대사\n\n/*\nINT. HIDDEN - NIGHT\n\n지문\n*/\n\nEXT. PLACE - DAY\n\n지문"
+    },
+    {
+      "section": "Sections and Synopses",
+      "text": "CUT TO:\n\n# 구성\n\nINT. PLACE - DAY"
+    },
+    {
+      "section": "Sections and Synopses",
+      "text": "# 구성\n\n## 구성\n\n### 구성\n\n## 구성\n\n# 구성"
+    },
+    {
+      "section": "Sections and Synopses",
+      "text": "# 구성\n\n= 시놉시스\n\nEXT. PLACE - DAY\n\n= 시놉시스\n\n지문"
+    },
+    {
+      "section": "Completed Example",
+      "text": "Title: 회귀 검사\nAuthor: 테스트\nContact: 테스트\n\nEXT. PLACE - DAY\n\n지문\n\nJACK\n(작게)\n대사\n\nSTEEL ^\n동시 대사\n\n>전환\n\n>끝<"
+    }
+  ],
+  "description": "Original synthetic regression cases covering the official syntax categories; not a copy of the example screenplay."
+}

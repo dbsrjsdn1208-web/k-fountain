@@ -1,0 +1,63 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {JSDOM,VirtualConsole} from 'jsdom';
+const compiled=await build({entryPoints:['src/main.js'],bundle:true,format:'iife',write:false,plugins:[{name:'omit-styles',setup(b){b.onLoad({filter:/\.css$/},()=>({contents:'',loader:'js'}));}}]});
+async function app(){
+  // jsdom does not implement upstream's nested @page rules; browser QA checks layout.
+  const errors=[],vc=new VirtualConsole();vc.on('jsdomError',e=>{if(!/Not implemented.*(?:scroll|navigation)|Could not parse CSS stylesheet/.test(e.message))errors.push(e.message);});
+  const dom=new JSDOM('<!doctype html><div id="app"></div><div id="toast"></div>',{url:'http://localhost/',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:vc});
+  const w=dom.window;w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(value=''){this.returnValue=value;this.open=false;this.dispatchEvent(new w.Event('close'));};
+  let writes=[],picks=0;const handle={name:'test.fountain',async queryPermission(){return 'granted';},async createWritable(){return {async write(text){writes.push(text);},async close(){},async abort(){}};}};
+  w.showSaveFilePicker=async()=>{picks++;return handle;};w.eval(compiled.outputFiles[0].text);
+  const q=s=>w.document.querySelector(s),input=q('#fountain-editor');
+  const edit=(text,type='insertText',composition=false)=>{input.dispatchEvent(new w.InputEvent('beforeinput',{inputType:type,bubbles:true}));input.value=text;input.setSelectionRange(text.length,text.length);input.dispatchEvent(new w.InputEvent('input',{inputType:type,bubbles:true,isComposing:composition}));};
+  const flush=()=>new Promise(r=>w.setTimeout(r,40));
+  return {dom,w,q,input,edit,flush,errors,writes,get picks(){return picks;}};
+}
+test('textarea shortcuts, undo, selection and IME compose through actual app listeners',async()=>{
+  const a=await app();try{
+    a.edit('한글');a.input.setSelectionRange(0,2);a.input.dispatchEvent(new a.w.KeyboardEvent('keydown',{key:'b',ctrlKey:true,bubbles:true,cancelable:true}));assert.equal(a.input.value,'**한글**');
+    a.input.dispatchEvent(new a.w.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));assert.equal(a.input.value,'한글');
+    a.input.dispatchEvent(new a.w.CompositionEvent('compositionstart'));a.edit('민서','insertCompositionText',true);assert.equal(a.input.value,'민서');
+    a.input.dispatchEvent(new a.w.CompositionEvent('compositionend'));assert.equal(a.input.value,'민서');
+    a.edit('민서정');assert.equal(a.input.value,'민서정');a.edit('민서\n','insertLineBreak');assert.equal(a.input.value,'@민서\n');assert.equal(a.input.selectionStart,4);
+    await a.flush();assert.deepEqual(a.errors,[]);
+  }finally{a.dom.window.close();}
+});
+test('settings apply live, source numbering keeps insertion caret and output mode preserves source',async()=>{
+  const a=await app();try{
+    a.q('#number-mode').value='source';a.q('#number-mode').dispatchEvent(new a.w.Event('change'));
+    a.edit('.방');assert.equal(a.input.value,'.방 #1#');assert.equal(a.input.selectionStart,2);
+    a.edit('.방 #5#\n\n.문 #90#');assert.equal(a.input.value,'.방 #1#\n\n.문 #2#');
+    a.q('#number-mode').value='output';a.q('#number-mode').dispatchEvent(new a.w.Event('change'));
+    a.edit('.방 #9#');assert.equal(a.input.value,'.방 #9#');
+    a.q('#font').value='맑은 고딕';a.q('#font').dispatchEvent(new a.w.Event('input'));await a.flush();assert.match(a.input.style.fontFamily,/맑은 고딕/);
+    assert.match(a.q('#preview').contentDocument.querySelector('main').textContent,/1 방/);assert.deepEqual(a.errors,[]);
+  }finally{a.dom.window.close();}
+});
+test('actual paste event preserves plain paragraph boundaries and converts inline marks',async()=>{
+  const a=await app();try{
+    a.edit('');const event=new a.w.Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(event,'clipboardData',{value:{getData:type=>type==='text/plain'?'첫 줄\n둘째 줄\n\n끝':'<p>첫 줄</p><p><b>둘째 줄</b></p><p><br></p><p><u>끝</u></p>'}});a.input.dispatchEvent(event);
+    assert.equal(a.input.value,'첫 줄\n**둘째 줄**\n\n_끝_');await a.flush();const d=a.q('#preview').contentDocument;assert.equal(d.querySelectorAll('.action').length,2);assert.match(d.querySelector('main').innerHTML,/<br/);
+    assert.deepEqual(a.errors,[]);
+  }finally{a.dom.window.close();}
+});
+test('Save button reuses the file; changed text is not falsely marked saved during async save',async()=>{
+  const a=await app();try{
+    a.edit('첫 원고');a.q('#save').click();await a.flush();a.edit('수정 원고');a.q('#save').click();await a.flush();assert.equal(a.picks,1);assert.deepEqual(a.writes,['첫 원고','수정 원고']);assert.match(a.q('#file-status').textContent,/파일에 저장됨/);
+    a.q('#save-as').click();await a.flush();assert.equal(a.picks,2);a.edit('다시 수정');assert.match(a.q('#file-status').textContent,/변경됨/);
+    assert.deepEqual(a.errors,[]);
+  }finally{a.dom.window.close();}
+});
+
+test('preview character click does not normalize source or add undo history',async()=>{
+  const a=await app();try{
+    a.edit('이전 원고','insertFromPaste');a.edit('민서','insertFromPaste');await a.flush();
+    const doc=a.q('#preview').contentDocument,p=doc.querySelector('[data-token]');
+    const original=doc.createRange.bind(doc);doc.createRange=()=>{const r=original();r.getClientRects=()=>{const end=r.startContainer.nodeType===3?r.endOffset:r.startContainer.textContent.length;return [{left:r.startOffset*10,right:end*10,top:10,bottom:30,width:(end-r.startOffset)*10,height:20}];};r.getBoundingClientRect=()=>r.getClientRects()[0];return r;};
+    a.input.focus();for(const type of ['pointerdown','click'])p.dispatchEvent(new a.w.MouseEvent(type,{bubbles:true,button:0,detail:1,clientX:(p.textContent.length-1)*10+2,clientY:20}));
+    assert.equal(a.input.selectionStart,1);assert.equal(a.input.value,'민서');assert.equal(a.w.document.activeElement,a.input);
+    a.input.dispatchEvent(new a.w.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));assert.equal(a.input.value,'이전 원고');assert.deepEqual(a.errors,[]);
+  }finally{a.dom.window.close();}
+});
