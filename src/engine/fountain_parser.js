@@ -82,7 +82,8 @@ function parse(fountainText, options = {}) {
   let blockStart=0;
   function push(type,value=null,extra={}){
     const spans=value?.map.filter(Boolean)||[],sourceStart=spans[0]?.[0]??blockStart,sourceEnd=spans.at(-1)?.[1]??sourceStart;
-    tokenList.push({type,...(value?{text:value.text}:{}),...extra,sourceLine:lineAt(sourceStart),sourceStart,sourceEnd,sourceMap:value?.map||[]});
+    const rawStart=lineStarts[lineAt(sourceStart)],lineEnd=original.indexOf('\n',Math.max(sourceStart,sourceEnd));
+    tokenList.push({type,...(value?{text:value.text}:{}),sourceLine:lineAt(sourceStart),sourceStart,sourceEnd,rawStart,rawEnd:lineEnd<0?original.length:lineEnd,sourceMap:value?.map||[],...extra});
   }
   function match(value,re){const m=new RegExp(re.source,re.flags.replace('g','')+'d').exec(value.text);return m?{m,c:n=>m.indices[n]?slice(value,...m.indices[n]):literal('')}:null;}
   const firstBlock=blocks.findIndex(b=>b.text.trim());
@@ -97,7 +98,7 @@ function parse(fountainText, options = {}) {
       for(let j=fields.length-1;j>=0;j--){
         const field=slice(block,fields[j].index,fields[j+1]?.index??block.text.length);
         const colon=field.text.indexOf(':');
-        push(field.text.slice(0,colon).trim().toLowerCase().replace(' ','_'),trim(slice(field,colon+1)));
+        push(field.text.slice(0,colon).trim().toLowerCase().replace(' ','_'),trim(slice(field,colon+1)),{rawStart:field.map.find(Boolean)?.[0],rawEnd:trim(field).map.filter(Boolean).at(-1)?.[1]});
       }continue;
     }
     if(block.text.startsWith('!')){push(TokenType.ACTION,remove(raw,/^!/));continue;}

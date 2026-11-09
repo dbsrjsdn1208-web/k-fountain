@@ -5,6 +5,7 @@ import {DEFAULT_SETTINGS,escapeHTML as esc,parseScreenplay,renderPreview,preview
 import {cleanNames,normalizeText,normalizeNewlines,mapSelection,toggleMarkup,clipboardFountain,migrateLegacy} from './text-tools.js';
 import {FileSession,handleDB} from './file-store.js';
 import {SourceEdits,installPreviewNavigation} from './preview-navigation.js';
+import {PreviewEditor,editorCSS} from './preview-editor.js';
 
 const STORAGE='k-fountain.document.v2',LEGACY='jangmyeon.document.v1';
 const SAMPLE='.기차역, 플랫폼 / 새벽\n\n첫 기차의 안내 방송이 흐른다.\n\n@민서 (작게)\n이번에는 **정말** 가는 거야.\n\n@도윤\n돌아와도 돼.\n\n.기차 안 / 아침\n\n_돌아오는 길은 언제나 여기 있을 테니까._';
@@ -15,6 +16,7 @@ function validate(value){
   settings.font=String(settings.font||DEFAULT_SETTINGS.font).slice(0,150);
   settings.size=[10,11,12,13,14].includes(+settings.size)?+settings.size:12;
   settings.numberMode=settings.numberMode==='source'?'source':'output';
+  settings.previewEditMode=settings.previewEditMode==='full'?'full':'source';
   if(!['default','cjk','dark','ocean','colorful'].includes(settings.theme))settings.theme='default';
   if(!['S#n.','S#n','n.','n'].includes(settings.txtNumbering))settings.txtNumbering='S#n.';
   return {version:2,text:normalizeNewlines(value.text),title:String(value.title||'제목 없는 시나리오').slice(0,150),names:cleanNames(value.names.join('\n')),settings};
@@ -25,13 +27,15 @@ try{const saved=localStorage.getItem(STORAGE)||localStorage.getItem(LEGACY);if(s
 const $=s=>document.querySelector(s),files=new FileSession();
 let elements,framePending=0,composing=false,dirty=false,previewText=null,previewKey='',toastTimer,recoveryTimer,revision=0;
 let history=[],historyIndex=-1,lastEditTime=0,lastEditType='',installPrompt;
+let previewEditor;
 document.querySelector('#app').innerHTML=`
 <header id="header-panel"><div class="title">K-파운틴</div><p>Fountain으로 쓰고, 대본으로 미리 봅니다.<br><span>Ctrl+B 굵게 · Ctrl+I 기울임 · Ctrl+U 밑줄</span></p><button id="install" hidden>앱 설치</button></header>
-<div id="top-panel"><div class="file-tools"><button id="new">새 문서</button><button id="open">열기</button><input id="title" aria-label="파일 이름" value="${esc(state.title)}"><button id="save" title="Ctrl+S">저장</button><button id="save-as" title="Ctrl+Shift+S">다른 이름으로 저장</button></div><div class="output-tools"><button id="pdf">PDF / 인쇄</button><button id="docx">DOCX</button><button id="txt">TXT</button><button id="settings">설정</button></div></div>
+<div id="top-panel"><div class="file-tools"><button id="new">새 문서</button><button id="open">열기</button><input id="title" aria-label="파일 이름" value="${esc(state.title)}"><button id="save" title="Ctrl+S">저장</button><button id="save-as" title="Ctrl+Shift+S">다른 이름으로 저장</button></div><div class="output-tools"><button id="preview-edit" aria-pressed="false">미리보기 편집</button><button id="pdf">PDF / 인쇄</button><button id="docx">DOCX</button><button id="txt">TXT</button><button id="settings">설정</button></div></div>
 <div id="main-app"><textarea id="fountain-editor" aria-label="Fountain 원고" spellcheck="false" wrap="soft" placeholder=".장소 / 시간&#10;&#10;@인물&#10;대사"></textarea><section id="html-render"><iframe id="preview" title="대본 미리보기" sandbox="allow-same-origin allow-modals"></iframe></section></div>
 <footer id="footer-panel"><span id="file-status">${recovered?'임시 원고 복원됨':'파일을 저장해 주세요'}</span><span id="recovery-status"></span><span class="credit"><a href="https://github.com/wixette/fountain2html" target="_blank" rel="noopener">fountain2html</a> · Apache-2.0</span></footer>
 <input id="file-input" type="file" accept=".fountain,.txt,.json" hidden>
 <dialog id="settings-dialog"><div class="dialog-heading"><h2>설정</h2><button type="button" data-close="settings-dialog" aria-label="설정 닫기">닫기</button></div><p class="hint">바꾸는 즉시 적용되며 다음 실행에도 유지됩니다.</p>
+<label>미리보기 편집 방식<select id="preview-edit-mode"><option value="source">문단의 Fountain 원문 편집</option><option value="full">미리보기 전체 작성</option></select></label><p class="hint">원문 편집은 문단을 클릭해 기호까지 수정합니다. 전체 작성은 .장소, @인물 등 Fountain 문법으로 작성합니다. Ctrl+Enter로 편집 중인 문단을 마칩니다.</p>
 <label>글꼴 이름<input id="font" type="text" maxlength="150" placeholder="예: 맑은 고딕, 나눔명조"></label><p class="hint">기기에 설치된 글꼴 이름을 입력하세요. 없는 글꼴은 기본 글꼴로 표시됩니다.</p>
 <div class="setting-row"><label>글자 크기<select id="size">${[10,11,12,13,14].map(n=>`<option value="${n}">${n} pt</option>`).join('')}</select></label><label>출력 테마<select id="theme"><option value="default">Default</option><option value="cjk">CJK</option><option value="dark">Dark</option><option value="ocean">Ocean</option><option value="colorful">Colorful</option></select></label></div>
 <label>장면 번호 자동<select id="number-mode"><option value="output">출력만 갱신 — 원고 유지</option><option value="source">원고에도 반영 — #1#, #2#</option><option value="off">끄기 — 직접 쓴 번호 유지</option></select></label><p class="hint">장면은 .장소 또는 INT. / EXT.로 시작합니다. #는 Fountain의 섹션 기호입니다. 원고 반영을 끄더라도 이미 쓴 번호는 지워지지 않습니다.</p>
@@ -71,14 +75,15 @@ previewDoc.open();previewDoc.write('<!doctype html><html lang="ko"><head><meta c
 const faces=[...document.styleSheets].flatMap(s=>{try{return [...s.cssRules].filter(r=>r.type===5).map(r=>r.cssText);}catch{return [];}}).join('\n');
 previewDoc.querySelector('#fonts').textContent=faces;
 function renderNow(){
+  if(previewEditor?.busy())return;
   const key=JSON.stringify([state.names,state.settings]);
   if(input.value!==previewText||key!==previewKey){
     elements=parseScreenplay(input.value,state.names,state.settings);
     const scroll=frame.contentWindow.scrollY,html=renderPreview(elements),main=previewDoc.querySelector('main');
     if(main.innerHTML!==html)main.innerHTML=html;
     navigationSnapshot={records:elements.navigation,version:sourceEdits.version};
-    if(key!==previewKey){previewDoc.querySelector('#style').textContent=previewCSS(state.settings);input.style.fontFamily=`${JSON.stringify(state.settings.font)},"Noto Serif KR",serif`;}
-    frame.contentWindow.scrollTo(0,scroll);previewText=input.value;previewKey=key;
+    if(key!==previewKey){previewDoc.querySelector('#style').textContent=previewCSS(state.settings)+editorCSS;input.style.fontFamily=`${JSON.stringify(state.settings.font)},"Noto Serif KR",serif`;}
+    frame.contentWindow.scrollTo(0,scroll);previewEditor?.decorate();previewText=input.value;previewKey=key;
   }followCaret();
 }
 function followCaret(){
@@ -100,7 +105,14 @@ function followCaret(){
   }
   if(rect.top<20||rect.bottom>frame.clientHeight-20)frame.contentWindow.scrollBy(0,rect.top-frame.clientHeight*.35);
 }
-installPreviewNavigation({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,isComposing:()=>composing,onNavigate:()=>{suppressFollow=true;}});
+previewEditor=new PreviewEditor({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,getMode:()=>state.settings.previewEditMode||'source',
+  apply:(text,start,end,type,auto)=>{suppressFollow=true;input.value=text;input.setSelectionRange(start,end);if(auto)normalize(true);record(type);changed();},
+  remember:()=>{if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();},undo:restoreHistory,
+  refresh:()=>{previewText=null;renderNow();},notify:toast,save:saveFile});
+$('#preview-edit').onclick=()=>{if(previewEditor.toggle(!previewEditor.enabled))$('#preview-edit').setAttribute('aria-pressed',String(previewEditor.enabled));};
+document.addEventListener('pointerdown',()=>{if(previewEditor.raw)previewEditor.finish();previewEditor.selection=null;});
+input.addEventListener('focus',()=>{previewEditor.selection=null;});
+installPreviewNavigation({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,isComposing:()=>composing||previewEditor.enabled,onNavigate:()=>{suppressFollow=true;}});
 input.addEventListener('beforeinput',event=>{
   suppressFollow=false;
   if(event.inputType==='historyUndo'||event.inputType==='historyRedo'){event.preventDefault();restoreHistory(event.inputType==='historyUndo'?-1:1);return;}
@@ -125,6 +137,7 @@ document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&e
 function filename(){return (state.title.trim()||'제목 없는 시나리오').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\.fountain$/i,'');}
 function download(data,name,type='text/plain;charset=utf-8'){const blob=data instanceof Blob?data:new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 async function saveFile(as=false){
+  if(!previewEditor.finish())return false;
   if(composing){toast('한글 입력을 마친 뒤 저장해 주세요.');return false;}
   normalize();record('normalize');changed();const text=input.value;
   try{
@@ -134,6 +147,7 @@ async function saveFile(as=false){
   }catch(error){if(error.name!=='AbortError')toast('저장하지 못했습니다. '+error.message);return false;}
 }
 async function confirmReplace(){
+  if(!previewEditor.finish())return false;
   if(!dirty&&files.lastSaved!==null)return true;
   const dialog=$('#replace-dialog');dialog.returnValue='cancel';dialog.showModal();
   const decision=await new Promise(resolve=>dialog.addEventListener('close',()=>resolve(dialog.returnValue),{once:true}));
@@ -154,12 +168,14 @@ $('#new').onclick=async()=>{if(await confirmReplace()){setDocument({...state,tex
 $('#save').onclick=()=>saveFile();$('#save-as').onclick=()=>saveFile(true);
 $('#title').oninput=e=>{state.title=e.target.value;updateStatus();queueRecovery();};
 function syncSettings(){
+  $('#preview-edit-mode').value=state.settings.previewEditMode||'source';
   $('#font').value=state.settings.font;$('#size').value=state.settings.size;$('#theme').value=state.settings.theme;
   $('#number-mode').value=state.settings.autoNumbers?state.settings.numberMode:'off';$('#txt-numbering').value=state.settings.txtNumbering;$('#names').value=state.names.join('\n');
   for(const [id,key]of Object.entries({'auto-characters':'autoCharacters','bold-characters':'boldCharacters',follow:'follow','hide-outline':'hideOutline'}))$('#'+id).checked=state.settings[key];
 }
 function settingChanged(normalizeSource=false){if(normalizeSource){normalize();record('settings');}changed();}
 $('#settings').onclick=()=>{syncSettings();$('#settings-dialog').showModal();};
+$('#preview-edit-mode').onchange=e=>{if(!previewEditor.finish()){e.target.value=state.settings.previewEditMode||'source';return;}state.settings.previewEditMode=e.target.value;previewEditor.selection=null;settingChanged();};
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$('#'+b.dataset.close).close());
 $('#settings-dialog').addEventListener('close',()=>input.focus());
 $('#font').oninput=e=>{state.settings.font=e.target.value.trim()||DEFAULT_SETTINGS.font;settingChanged();};
@@ -174,8 +190,9 @@ async function saveExport(blob,extension){
   if(window.showSaveFilePicker){const handle=await window.showSaveFilePicker({suggestedName:filename()+'.'+extension,id:'k-fountain-export',types:[{description:extension.toUpperCase(),accept:{'text/plain':['.txt']}}]});const writable=await handle.createWritable();try{await writable.write(blob);await writable.close();}catch(e){try{await writable.abort();}catch{}throw e;}}
   else download(blob,filename()+'.'+extension);
 }
-$('#pdf').onclick=async()=>{renderNow();await previewDoc.fonts.ready;previewDoc.title=state.title;frame.contentWindow.focus();frame.contentWindow.print();};
+$('#pdf').onclick=async()=>{if(!previewEditor.finish())return;renderNow();await previewDoc.fonts.ready;previewDoc.title=state.title;frame.contentWindow.focus();frame.contentWindow.print();};
 $('#docx').onclick=async()=>{
+  if(!previewEditor.finish())return;
   // Open the picker within the user gesture, before loading the export library.
   try{const handle=window.showSaveFilePicker?await window.showSaveFilePicker({suggestedName:filename()+'.docx',id:'k-fountain-export',types:[{description:'Word 문서',accept:{'application/vnd.openxmlformats-officedocument.wordprocessingml.document':['.docx']}}]}):null;
     renderNow();const {docxBlob}=await import('./exports.js'),blob=await docxBlob(elements,state.title,state.settings);
@@ -184,7 +201,7 @@ $('#docx').onclick=async()=>{
 };
 $('#txt').onclick=()=>{$('#txt-numbering').value=state.settings.txtNumbering;$('#txt-dialog').showModal();};
 $('#txt-numbering').onchange=e=>{state.settings.txtNumbering=e.target.value;queueRecovery();};
-$('#export-txt').onclick=async()=>{try{renderNow();await saveExport(exportReadableText(elements),'txt');$('#txt-dialog').close();toast('TXT를 저장했습니다.');}catch(e){if(e.name!=='AbortError')toast(e.message);}};
+$('#export-txt').onclick=async()=>{if(!previewEditor.finish())return;try{renderNow();await saveExport(exportReadableText(elements),'txt');$('#txt-dialog').close();toast('TXT를 저장했습니다.');}catch(e){if(e.name!=='AbortError')toast(e.message);}};
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;$('#install').hidden=false;});
 $('#install').onclick=async()=>{if(installPrompt){await installPrompt.prompt();installPrompt=null;$('#install').hidden=true;}};
 window.addEventListener('appinstalled',()=>{$('#install').hidden=true;});

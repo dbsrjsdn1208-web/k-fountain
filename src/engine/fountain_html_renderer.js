@@ -63,13 +63,15 @@ ${body}
 </html>
 `
 
-function inlineMapped(value) {
+function inlineMapped(value,pairs=[]) {
   value=replace(value,INLINE_RE.NOTE_INLINE,(m)=>literal('<!-- '+m[1]+' -->'));
   value=replace(value,/\\([*_])/g,(m,c)=>literal(m[1]==='*'?'\uE000':'\uE001',c(1).map[0]));
   for(const style of Object.keys(INLINE_RE)){
     if(style==='NOTE_INLINE')continue;
     value=replace(value,INLINE_RE[style],(m,c)=>{
       if(/^\s|\s$/.test(m[2]))return c(0);
+      const open=c(1).map.filter(Boolean),close=c(3).map.filter(Boolean);
+      if(open.length&&close.length)pairs.push({open:[open[0][0],open.at(-1)[1]],close:[close[0][0],close.at(-1)[1]]});
       const [before,after]=INLINE_HTML[style].split('$2');
       return join([literal(before),c(2),literal(after)]);
     });
@@ -94,7 +96,7 @@ function render(fountainObject, theme, options = {}) {
   for (const original of fountainObject.tokens) {
     const token={...original};
     const beforeBody=bodyBuf.length,beforeTitle=titlePageBuf.length;
-    const formatted=inlineMapped(escape(mapped(token.text||'',token.sourceMap)));
+    const formatPairs=[],formatted=inlineMapped(escape(mapped(token.text||'',token.sourceMap)),formatPairs);
     const display=visible(formatted);let prefix='';
     token.text = formatted.text;
     switch (token.type) {
@@ -191,7 +193,7 @@ function render(fountainObject, theme, options = {}) {
       const last=buffer.length-1;
       buffer[last]=buffer[last].replace(/^<(h1|h2|h3|p|hr|br)(?=[ >])/,(m)=>`${m} data-source="${token.sourceLine}" data-token="${token.sourceId}"`);
       const generated=visible(mapped(prefix)).text;
-      if(options.navigation&&/data-token=/.test(buffer[last]))options.navigation.set(String(token.sourceId),{sourceStart:token.sourceStart,sourceEnd:token.sourceEnd,text:generated+display.text,map:[...Array.from({length:generated.length},()=>[token.sourceStart,token.sourceStart]),...display.map]});
+      if(options.navigation&&/data-token=/.test(buffer[last]))options.navigation.set(String(token.sourceId),{type:token.type,rawStart:token.rawStart,rawEnd:token.rawEnd,sourceStart:token.sourceStart,sourceEnd:token.sourceEnd,formatPairs,text:generated+display.text,map:[...Array.from({length:generated.length},()=>[token.sourceStart,token.sourceStart]),...display.map]});
     }
   }
 

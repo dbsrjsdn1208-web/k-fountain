@@ -5,7 +5,7 @@ import {render,inlineTagsToHtml} from './engine/fountain_html_renderer.js';
 import themes from './engine/themes.js';
 import {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,mergeRuns,sliceRuns,groupElements} from './rich-text.js';
 export {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,groupElements};
-export const DEFAULT_SETTINGS={font:'Noto Serif KR',size:12,numbering:'n',txtNumbering:'S#n.',numberMode:'output',follow:true,hashScenes:false,sNumberScenes:false,numericScenes:false,autoNumbers:true,autoCharacters:true,boldCharacters:true,hideOutline:false,theme:'default'};
+export const DEFAULT_SETTINGS={font:'Noto Serif KR',size:12,numbering:'n',txtNumbering:'S#n.',numberMode:'output',follow:true,hashScenes:false,sNumberScenes:false,numericScenes:false,autoNumbers:true,autoCharacters:true,boldCharacters:true,hideOutline:false,theme:'default',previewEditMode:'source'};
 export const FONT_OPTIONS=[]; // Kept only for compatibility with pre-v2 saved work.
 export function plainTextDoc(text){return {type:'doc',content:text.replace(/\r\n?/g,'\n').split('\n').map(text=>({type:'paragraph',content:text?[{type:'text',text}]:[]}))};}
 function escaped(s){return s.replace(/([\\*_])/g,'\\$1');}

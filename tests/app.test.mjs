@@ -61,3 +61,11 @@ test('preview character click does not normalize source or add undo history',asy
     a.input.dispatchEvent(new a.w.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));assert.equal(a.input.value,'이전 원고');assert.deepEqual(a.errors,[]);
   }finally{a.dom.window.close();}
 });
+
+test('preview toggle defaults off, mode persists, and raw edits reach the real file save handler',async()=>{
+  const a=await app();try{
+    assert.equal(a.q('#preview-edit').getAttribute('aria-pressed'),'false');assert.equal(a.q('#preview-edit-mode').value,'source');
+    a.edit('.방 #8#\n\n@민서\n원래 대사');await a.flush();a.q('#preview-edit').click();const d=a.q('#preview').contentDocument;d.querySelector('.dialogue').click();const field=d.querySelector('.preview-raw');field.value='마지막 수정';field.dispatchEvent(new a.w.Event('input',{bubbles:true}));a.q('#save').click();await a.flush();assert.match(a.writes[0],/마지막 수정/);assert.ok(!d.querySelector('.preview-raw'));
+    a.q('#preview-edit-mode').value='full';a.q('#preview-edit-mode').dispatchEvent(new a.w.Event('change'));a.w.dispatchEvent(new a.w.Event('pagehide'));assert.equal(JSON.parse(a.w.localStorage.getItem('k-fountain.document.v2')).settings.previewEditMode,'full');a.q('#preview-edit').click();await a.flush();assert.equal(d.querySelector('main').contentEditable,'false');assert.deepEqual(a.errors,[]);
+  }finally{a.dom.window.close();}
+});
