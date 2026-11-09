@@ -205,7 +205,11 @@ $('#export-txt').onclick=async()=>{if(!previewEditor.finish())return;try{renderN
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;$('#install').hidden=false;});
 $('#install').onclick=async()=>{if(installPrompt){await installPrompt.prompt();installPrompt=null;$('#install').hidden=true;}};
 window.addEventListener('appinstalled',()=>{$('#install').hidden=true;});
-if('serviceWorker'in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
+if('serviceWorker'in navigator&&location.protocol!=='file:'){
+  const ready=()=>navigator.serviceWorker.controller?.postMessage({type:'K_FOUNTAIN_READY',version:document.querySelector('meta[name="k-fountain-version"]')?.content});
+  navigator.serviceWorker.addEventListener('controllerchange',ready);
+  navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(()=>navigator.serviceWorker.ready).then(ready).catch(()=>{});
+}
 window.addEventListener('pagehide',saveRecovery);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)saveRecovery();});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});

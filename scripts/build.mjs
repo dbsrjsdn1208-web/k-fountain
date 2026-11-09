@@ -2,9 +2,12 @@ import { build } from 'esbuild';
 import { mkdir, copyFile, readFile, writeFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import {deflateSync} from 'node:zlib';
+import {workerSource} from './service-worker.mjs';
 await mkdir('dist',{recursive:true});
-const built=await build({entryPoints:{app:'src/main.js'},bundle:true,splitting:true,format:'esm',target:'es2022',outdir:'dist',chunkNames:'chunks/[name]-[hash]',minify:true,metafile:true,sourcemap:false,loader:{'.woff2':'file','.woff':'file'},assetNames:'fonts/[name]-[hash]',legalComments:'eof'});
-await copyFile('index.html','dist/index.html');
+const built=await build({entryPoints:{app:'src/main.js'},bundle:true,splitting:true,format:'esm',target:'es2022',outdir:'dist',entryNames:'[name]-[hash]',chunkNames:'chunks/[name]-[hash]',minify:true,metafile:true,sourcemap:false,loader:{'.woff2':'file','.woff':'file'},assetNames:'fonts/[name]-[hash]',legalComments:'eof'});
+const [entryPath,entryInfo]=Object.entries(built.metafile.outputs).find(([,info])=>info.entryPoint==='src/main.js');
+const appVersion=entryPath.replace(/^dist\//,''),cssPath=entryInfo.cssBundle.replace(/^dist\//,'');
+await writeFile('dist/index.html',(await readFile('index.html','utf8')).replace('./app.js','./'+appVersion).replace('./app.css','./'+cssPath).replace('</head>',`<meta name="k-fountain-version" content="${appVersion}">\n</head>`));
 const lock=JSON.parse(await readFile('package-lock.json','utf8'));
 let notices='THIRD-PARTY NOTICES\n\nDerived from wixette/fountain2html f7a741d06a3de6602efe04f4673daa315e3bc9da\nhttps://github.com/wixette/fountain2html\nApache License 2.0\n'+await readFile('vendor/fountain2html/LICENSE','utf8')+'\n';
 for(const [location,entry] of Object.entries(lock.packages||{})){
@@ -22,12 +25,7 @@ await writeFile('dist/manifest.webmanifest',JSON.stringify({id:'./',name:'K-íŒŒì
 const assets=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png',...Object.keys(built.metafile.outputs).map(p=>'./'+p.replace(/^dist\//,''))];
 const hash=createHash('sha256');for(const asset of assets.filter(x=>x!=='./'))hash.update(await readFile('dist/'+asset.slice(2)));
 const version='k-fountain-'+hash.digest('hex').slice(0,16);
-await writeFile('dist/sw.js',`const CACHE=${JSON.stringify(version)},ASSETS=${JSON.stringify(assets)};
-self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS))));
-// No skipWaiting: never replace the app under an open manuscript.
-self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('k-fountain-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
-self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin)return;const known=ASSETS.some(p=>new URL(p,self.registration.scope).pathname===u.pathname);if(!known&&e.request.mode!=='navigate')return;e.respondWith(caches.open(CACHE).then(async c=>(await c.match(e.request,{ignoreSearch:true}))||(e.request.mode==='navigate'?await c.match('./index.html'):null)||fetch(e.request)));});
-`);
+await writeFile('dist/sw.js',workerSource(version,assets,appVersion));
 console.log('Built dist/');
 if(process.argv.includes('--standalone')){
   const result=await build({entryPoints:['src/main.js'],bundle:true,format:'iife',target:'es2022',outfile:'app.js',minify:true,write:false,loader:{'.woff2':'dataurl','.woff':'dataurl'},legalComments:'eof'});
