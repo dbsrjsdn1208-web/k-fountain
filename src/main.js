@@ -35,7 +35,7 @@ document.querySelector('#app').innerHTML=`
 <footer id="footer-panel"><span id="file-status">${recovered?'임시 원고 복원됨':'파일을 저장해 주세요'}</span><span id="recovery-status"></span><span class="credit"><a href="https://github.com/wixette/fountain2html" target="_blank" rel="noopener">fountain2html</a> · Apache-2.0</span></footer>
 <input id="file-input" type="file" accept=".fountain,.txt,.json" hidden>
 <dialog id="settings-dialog"><div class="dialog-heading"><h2>설정</h2><button type="button" data-close="settings-dialog" aria-label="설정 닫기">닫기</button></div><p class="hint">바꾸는 즉시 적용되며 다음 실행에도 유지됩니다.</p>
-<label>미리보기 편집 방식<select id="preview-edit-mode"><option value="source">문단의 Fountain 원문 편집</option><option value="full">미리보기 전체 작성</option></select></label><p class="hint">원문 편집은 문단을 클릭해 기호까지 수정합니다. 전체 작성은 .장소, @인물 등 Fountain 문법으로 작성합니다. Ctrl+Enter로 편집 중인 문단을 마칩니다.</p>
+<label>미리보기 편집 방식<select id="preview-edit-mode"><option value="source">라이브 프리뷰 — 옵시디언 방식</option><option value="full">미리보기 전체 작성</option></select></label><p class="hint">라이브 프리뷰는 대본 위에서 바로 작성하며 커서 주변의 Fountain 기호를 보여 줍니다. 방향키와 Enter로 계속 이어 쓰세요. 전체 작성은 기호를 숨긴 서식 위에서 편집합니다.</p>
 <label>글꼴 이름<input id="font" type="text" maxlength="150" placeholder="예: 맑은 고딕, 나눔명조"></label><p class="hint">기기에 설치된 글꼴 이름을 입력하세요. 없는 글꼴은 기본 글꼴로 표시됩니다.</p>
 <div class="setting-row"><label>글자 크기<select id="size">${[10,11,12,13,14].map(n=>`<option value="${n}">${n} pt</option>`).join('')}</select></label><label>출력 테마<select id="theme"><option value="default">Default</option><option value="cjk">CJK</option><option value="dark">Dark</option><option value="ocean">Ocean</option><option value="colorful">Colorful</option></select></label></div>
 <label>장면 번호 자동<select id="number-mode"><option value="output">출력만 갱신 — 원고 유지</option><option value="source">원고에도 반영 — #1#, #2#</option><option value="off">끄기 — 직접 쓴 번호 유지</option></select></label><p class="hint">장면은 .장소 또는 INT. / EXT.로 시작합니다. #는 Fountain의 섹션 기호입니다. 원고 반영을 끄더라도 이미 쓴 번호는 지워지지 않습니다.</p>
@@ -110,8 +110,8 @@ previewEditor=new PreviewEditor({doc:previewDoc,input,edits:sourceEdits,getSnaps
   remember:()=>{if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();},undo:restoreHistory,
   refresh:()=>{previewText=null;renderNow();},notify:toast,save:saveFile});
 $('#preview-edit').onclick=()=>{if(previewEditor.toggle(!previewEditor.enabled))$('#preview-edit').setAttribute('aria-pressed',String(previewEditor.enabled));};
-document.addEventListener('pointerdown',()=>{if(previewEditor.raw)previewEditor.finish();previewEditor.selection=null;});
-input.addEventListener('focus',()=>{previewEditor.selection=null;});
+document.addEventListener('pointerdown',()=>previewEditor.clearSelection());
+input.addEventListener('focus',()=>previewEditor.clearSelection());
 installPreviewNavigation({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,isComposing:()=>composing||previewEditor.enabled,onNavigate:()=>{suppressFollow=true;}});
 input.addEventListener('beforeinput',event=>{
   suppressFollow=false;

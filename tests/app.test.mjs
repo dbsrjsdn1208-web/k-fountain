@@ -62,10 +62,20 @@ test('preview character click does not normalize source or add undo history',asy
   }finally{a.dom.window.close();}
 });
 
-test('preview toggle defaults off, mode persists, and raw edits reach the real file save handler',async()=>{
+test('preview toggle defaults off, mode persists, and live edits reach the real file save handler',async()=>{
   const a=await app();try{
     assert.equal(a.q('#preview-edit').getAttribute('aria-pressed'),'false');assert.equal(a.q('#preview-edit-mode').value,'source');
-    a.edit('.방 #8#\n\n@민서\n원래 대사');await a.flush();a.q('#preview-edit').click();const d=a.q('#preview').contentDocument;d.querySelector('.dialogue').click();const field=d.querySelector('.preview-raw');field.value='마지막 수정';field.dispatchEvent(new a.w.Event('input',{bubbles:true}));a.q('#save').click();await a.flush();assert.match(a.writes[0],/마지막 수정/);assert.ok(!d.querySelector('.preview-raw'));
+    a.edit('.방 #8#\n\n@민서\n원래 대사');await a.flush();a.q('#preview-edit').click();const d=a.q('#preview').contentDocument,main=d.querySelector('main'),node=d.querySelector('.dialogue').firstChild.firstChild;d.getSelection().setBaseAndExtent(node,0,node,node.length);d.dispatchEvent(new d.defaultView.Event('selectionchange'));main.dispatchEvent(new d.defaultView.InputEvent('beforeinput',{bubbles:true,cancelable:true,inputType:'insertText',data:'마지막 수정'}));a.q('#save').click();await a.flush();assert.match(a.writes[0],/마지막 수정/);assert.ok(!d.querySelector('.preview-raw'));
     a.q('#preview-edit-mode').value='full';a.q('#preview-edit-mode').dispatchEvent(new a.w.Event('change'));a.w.dispatchEvent(new a.w.Event('pagehide'));assert.equal(JSON.parse(a.w.localStorage.getItem('k-fountain.document.v2')).settings.previewEditMode,'full');a.q('#preview-edit').click();await a.flush();assert.equal(d.querySelector('main').contentEditable,'false');assert.deepEqual(a.errors,[]);
+  }finally{a.dom.window.close();}
+});
+
+test('PDF print receives the last live edit with cursor syntax removed',async()=>{
+  const a=await app();try{
+    a.edit('.방\n\n원래 **대사**');await a.flush();a.q('#preview-edit').click();const frame=a.q('#preview'),d=frame.contentDocument,main=d.querySelector('main'),node=d.querySelector('.bold').firstChild;
+    d.getSelection().setBaseAndExtent(node,0,node,node.length);d.dispatchEvent(new d.defaultView.Event('selectionchange'));
+    main.dispatchEvent(new d.defaultView.InputEvent('beforeinput',{bubbles:true,cancelable:true,inputType:'insertText',data:'최종'}));
+    Object.defineProperty(d,'fonts',{value:{ready:Promise.resolve()}});let printed='';frame.contentWindow.focus=()=>{};frame.contentWindow.print=()=>{printed=main.textContent;assert.equal(main.querySelectorAll('.preview-syntax').length,0);};
+    await a.q('#pdf').onclick();assert.match(printed,/최종/);assert.ok(!printed.includes('**'));assert.match(a.input.value,/\*\*최종\*\*/);assert.deepEqual(a.errors,[]);
   }finally{a.dom.window.close();}
 });
