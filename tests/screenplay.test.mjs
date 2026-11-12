@@ -11,7 +11,7 @@ import {plainTextDoc,parseScreenplay,renderPreview,prepareSource,previewCSS,expo
 import {docxBuffer} from '../src/exports.js';
 const from=(s,settings={},names=['민수','영희'])=>parseScreenplay(plainTextDoc(s),names,settings);
 const tokens=s=>parse(s).tokens;
-const clean=ts=>ts.map(({sourceLine,sourceStart,sourceEnd,sourceMap,sourceId,rawStart,rawEnd,...t})=>t);
+const clean=ts=>ts.map(({sourceLine,sourceStart,sourceEnd,sourceMap,sourceId,rawStart,rawEnd,note,...t})=>t);
 const upstream=fs.readFileSync(new URL('../vendor/fountain2html/src/fountain_parser.test.js',import.meta.url),'utf8');
 for(const m of upstream.matchAll(/const (TEXT_\d+) = `([\s\S]*?)`/g)){
   test('production parser matches upstream fixture '+m[1],()=>{

@@ -5,7 +5,7 @@ import {render,inlineTagsToHtml} from './engine/fountain_html_renderer.js';
 import themes from './engine/themes.js';
 import {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,mergeRuns,sliceRuns,groupElements} from './rich-text.js';
 export {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,groupElements};
-export const DEFAULT_SETTINGS={font:'Noto Serif KR',size:12,numbering:'n',txtNumbering:'S#n.',numberMode:'output',follow:true,hashScenes:false,sNumberScenes:false,numericScenes:false,autoNumbers:true,autoCharacters:true,boldCharacters:true,hideOutline:false,theme:'default',previewEditMode:'source'};
+export const DEFAULT_SETTINGS={font:'Noto Serif KR',size:12,numbering:'n',txtNumbering:'S#n.',numberMode:'output',follow:true,hashScenes:false,sNumberScenes:false,numericScenes:false,autoNumbers:true,autoCharacters:true,boldCharacters:true,hideOutline:false,theme:'default',previewEditMode:'source',showNotes:false};
 export const FONT_OPTIONS=[]; // Kept only for compatibility with pre-v2 saved work.
 export function plainTextDoc(text){return {type:'doc',content:text.replace(/\r\n?/g,'\n').split('\n').map(text=>({type:'paragraph',content:text?[{type:'text',text}]:[]}))};}
 function escaped(s){return s.replace(/([\\*_])/g,'\\$1');}
@@ -91,10 +91,10 @@ export function parseScreenplay(doc,names=[],settings={}){
   elements.model=model;elements.source=source;elements.outputElements=output;elements.settings=cfg;
   return elements;
 }
-export function renderPreview(elements){
+export function renderPreview(elements,{showNotes=false}={}){
   const cfg=elements.settings;
   elements.navigation=new Map();
-  const html=render(elements.model,cfg.theme,{navigation:elements.navigation,hideOutline:cfg.hideOutline,showManualNumbers:true,sceneLabel:cfg.autoNumbers?n=>escapeHTML(sceneLabel(n,cfg.numbering)):null});
+  const html=render(elements.model,cfg.theme,{navigation:elements.navigation,showNotes,hideOutline:cfg.hideOutline,showManualNumbers:true,sceneLabel:cfg.autoNumbers?n=>escapeHTML(sceneLabel(n,cfg.numbering)):null});
   return html.match(/<main>\n([\s\S]*?)\n<\/main>/)?.[1]||'';
 }
 export function previewCSS(settings){

@@ -7,7 +7,7 @@ async function app(){
   // jsdom does not implement upstream's nested @page rules; browser QA checks layout.
   const errors=[],vc=new VirtualConsole();vc.on('jsdomError',e=>{if(!/Not implemented.*(?:scroll|navigation)|Could not parse CSS stylesheet/.test(e.message))errors.push(e.message);});
   const dom=new JSDOM('<!doctype html><div id="app"></div><div id="toast"></div>',{url:'http://localhost/',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:vc});
-  const w=dom.window;w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(value=''){this.returnValue=value;this.open=false;this.dispatchEvent(new w.Event('close'));};
+  const w=dom.window;w.matchMedia=()=>({matches:false,addEventListener(){}});w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(value=''){this.returnValue=value;this.open=false;this.dispatchEvent(new w.Event('close'));};
   let writes=[],picks=0;const handle={name:'test.fountain',async queryPermission(){return 'granted';},async createWritable(){return {async write(text){writes.push(text);},async close(){},async abort(){}};}};
   w.showSaveFilePicker=async()=>{picks++;return handle;};w.eval(compiled.outputFiles[0].text);
   const q=s=>w.document.querySelector(s),input=q('#fountain-editor');
@@ -75,7 +75,27 @@ test('PDF print receives the last live edit with cursor syntax removed',async()=
     a.edit('.방\n\n원래 **대사**');await a.flush();a.q('#preview-edit').click();const frame=a.q('#preview'),d=frame.contentDocument,main=d.querySelector('main'),node=d.querySelector('.bold').firstChild;
     d.getSelection().setBaseAndExtent(node,0,node,node.length);d.dispatchEvent(new d.defaultView.Event('selectionchange'));
     main.dispatchEvent(new d.defaultView.InputEvent('beforeinput',{bubbles:true,cancelable:true,inputType:'insertText',data:'최종'}));
-    Object.defineProperty(d,'fonts',{value:{ready:Promise.resolve()}});let printed='';frame.contentWindow.focus=()=>{};frame.contentWindow.print=()=>{printed=main.textContent;assert.equal(main.querySelectorAll('.preview-syntax').length,0);};
+    let printed='';const append=a.w.document.body.append.bind(a.w.document.body);a.w.document.body.append=(el)=>{append(el);if(el.id==='print-frame'){Object.defineProperty(el.contentDocument,'fonts',{value:{ready:Promise.resolve()}});el.contentWindow.focus=()=>{};el.contentWindow.print=()=>{printed=el.contentDocument.querySelector('main').textContent;assert.equal(el.contentDocument.querySelectorAll('.preview-syntax,.preview-note').length,0);};}};
     await a.q('#pdf').onclick();assert.match(printed,/최종/);assert.ok(!printed.includes('**'));assert.match(a.input.value,/\*\*최종\*\*/);assert.deepEqual(a.errors,[]);
   }finally{a.dom.window.close();}
+});
+
+test('preview movement updates source selection without taking focus or adding history',async()=>{
+ const a=await app();try{
+  a.edit('@민서\n첫 대사\n둘째 대사');await a.flush();a.q('#preview-edit').click();
+  const d=a.q('#preview').contentDocument,main=d.querySelector('main'),node=d.querySelector('.dialogue span').firstChild;
+  main.focus();d.getSelection().setBaseAndExtent(node,2,node,2);d.dispatchEvent(new d.defaultView.Event('selectionchange'));await a.flush();
+  assert.equal(a.input.selectionEnd,6);assert.notEqual(a.w.document.activeElement,a.input);
+  a.q('#view').click();a.q('#view-source').click();assert.equal(a.input.hidden,true);a.q('#view-source').click();assert.equal(a.input.hidden,false);
+  assert.equal(a.input.value,'@민서\n첫 대사\n둘째 대사');assert.deepEqual(a.errors,[]);
+ }finally{a.dom.window.close();}
+});
+test('notes toggle renders in reading and editing modes without altering source',async()=>{
+ const a=await app();try{
+  const text='앞[[메모]]뒤\n\n[[여러 줄\n\n메모 끝]]';a.edit(text);await a.flush();const d=a.q('#preview').contentDocument;
+  assert.ok(!d.querySelector('main').textContent.includes('메모'));
+  a.q('#show-notes').checked=true;a.q('#show-notes').dispatchEvent(new a.w.Event('change'));await a.flush();assert.match(d.querySelector('main').textContent,/메모 끝/);
+  a.q('#preview-edit').click();assert.match(d.querySelector('main').textContent,/메모 끝/);
+  a.q('#show-notes').checked=false;a.q('#show-notes').dispatchEvent(new a.w.Event('change'));await a.flush();assert.ok(!d.querySelector('main').textContent.includes('메모'));assert.equal(a.input.value,text);assert.deepEqual(a.errors,[]);
+ }finally{a.dom.window.close();}
 });

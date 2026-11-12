@@ -26,7 +26,7 @@ const INLINE_RE = {
   BOLD: /(\*{2}(?=.+\*{2}))(.+?)(\*{2})/g,
   ITALIC_UNDERLINE: /(_{1}\*{1}(?=.+\*{1}_{1})|\*{1}_{1}(?=.+_{1}\*{1}))(.+?)(\*{1}_{1}|_{1}\*{1})/g,
   ITALIC: /(\*{1}(?=.+\*{1}))(.+?)(\*{1})/g,
-  NOTE_INLINE: /(?:\[{2}(?!\[+))([\s\S]+?)(?:\]{2}(?!\[+))/g,
+  NOTE_INLINE: /(?:\[{2}(?!\[+))([\s\S]*?)(?:\]{2}(?!\[+))/g,
   UNDERLINE: /(_{1}(?=.+_{1}))(.+?)(_{1})/g,
 };
 
@@ -63,8 +63,13 @@ ${body}
 </html>
 `
 
-function inlineMapped(value,pairs=[]) {
-  value=replace(value,INLINE_RE.NOTE_INLINE,(m)=>literal('<!-- '+m[1]+' -->'));
+function inlineMapped(value,pairs=[],showNotes=false) {
+  const notes=[];
+  value=replace(value,INLINE_RE.NOTE_INLINE,(m,c)=>{
+    if(!showNotes)return literal('');
+    const index=notes.push(join([literal('<span class="preview-note">'),c(0),literal('</span>')]))-1;
+    return literal(`\uE002${index}\uE003`);
+  });
   value=replace(value,/\\([*_])/g,(m,c)=>literal(m[1]==='*'?'\uE000':'\uE001',c(1).map[0]));
   for(const style of Object.keys(INLINE_RE)){
     if(style==='NOTE_INLINE')continue;
@@ -77,6 +82,7 @@ function inlineMapped(value,pairs=[]) {
     });
   }
   value=replace(value,/[\uE000\uE001]/g,(m,c)=>literal(m[0]==='\uE000'?'*':'_',c(0).map[0]));
+  value=replace(value,/\uE002(\d+)\uE003/g,(m,c)=>notes[+m[1]]||c(0));
   return replace(value,/\n/g,()=>literal('<br />'));
 }
 function inlineTagsToHtml(s){return inlineMapped(mapped(s||'')).text;}
@@ -96,7 +102,9 @@ function render(fountainObject, theme, options = {}) {
   for (const original of fountainObject.tokens) {
     const token={...original};
     const beforeBody=bodyBuf.length,beforeTitle=titlePageBuf.length;
-    const formatPairs=[],formatted=inlineMapped(escape(mapped(token.text||'',token.sourceMap)),formatPairs);
+    const formatPairs=[],formatted=token.type===TokenType.NOTE&&options.showNotes
+      ?join([literal('<span class="preview-note">'),escape(token.note||mapped(`[[${token.text||''}]]`)),literal('</span>')])
+      :inlineMapped(escape(mapped(token.text||'',token.sourceMap)),formatPairs,options.showNotes);
     const display=visible(formatted);let prefix='';
     token.text = formatted.text;
     switch (token.type) {
@@ -171,7 +179,7 @@ function render(fountainObject, theme, options = {}) {
         if(!options.hideOutline)bodyBuf.push(`<p class="synopsis">${token.text}</p>`);
         break;
       case TokenType.NOTE:
-        bodyBuf.push(`<!-- ${token.text} -->`);
+        if(options.showNotes)bodyBuf.push(`<p class="note">${token.text}</p>`);
         break;
       case TokenType.ACTION:
         bodyBuf.push(`<p class="action">${token.text}</p>`);

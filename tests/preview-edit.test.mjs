@@ -7,11 +7,11 @@ import {parseScreenplay,renderPreview,exportReadableText} from '../src/screenpla
 import {normalizeText} from '../src/text-tools.js';
 import {docxBuffer} from '../src/exports.js';
 import {unzipSync,strFromU8} from 'fflate';
-function app(text,mode='full'){
+function app(text,mode='full',options={}){
   const dom=new JSDOM('<textarea></textarea><main></main>',{pretendToBeVisual:true}),doc=dom.window.document,input=doc.querySelector('textarea'),main=doc.querySelector('main');input.value=text;
   const edits=new SourceEdits(text);let snapshot,editor,model,history=[text],idx=0;const notices=[];
-  const render=()=>{if(editor?.busy())return;model=parseScreenplay(input.value,['민서','도윤']);main.innerHTML=renderPreview(model);snapshot={version:edits.version,records:model.navigation};editor?.decorate();};
-  editor=new PreviewEditor({doc,input,edits,getSnapshot:()=>snapshot,getMode:()=>mode,notify:x=>notices.push(x),save:()=>{},remember:()=>{},undo:d=>{if(history[idx+d]!==undefined){input.value=history[idx+=d];edits.record(input.value);}},apply:(value,start,end,type,auto)=>{input.value=auto?normalizeText(value,['민서','도윤'],{}):value;input.setSelectionRange(start,end);edits.record(input.value);history=history.slice(0,idx+1);history.push(input.value);idx++;},refresh:render});render();editor.toggle(true);
+  const render=()=>{if(editor?.busy())return;model=parseScreenplay(input.value,['민서','도윤']);main.innerHTML=renderPreview(model,{showNotes:options.showNotes});snapshot={version:edits.version,records:model.navigation};editor?.decorate();};
+  editor=new PreviewEditor({doc,input,edits,getSnapshot:()=>snapshot,getMode:()=>mode,getShowNotes:()=>options.showNotes===true,onSelection:(...args)=>options.onSelection?.(...args),notify:x=>notices.push(x),save:()=>{},remember:()=>{},undo:d=>{if(history[idx+d]!==undefined){input.value=history[idx+=d];edits.record(input.value);}},apply:(value,start,end,type,auto)=>{input.value=auto?normalizeText(value,['민서','도윤'],{}):value;input.setSelectionRange(start,end);edits.record(input.value);history=history.slice(0,idx+1);history.push(input.value);idx++;},refresh:render});render();editor.toggle(true);
   const select=(a,b=a)=>{editor.selection={anchor:a,focus:b};if(editor.live())editor.updateLive(false);editor.restoreSelection();};
   const type=(data,inputType='insertText')=>main.dispatchEvent(new dom.window.InputEvent('beforeinput',{bubbles:true,cancelable:true,inputType,data}));
   return {dom,doc,input,main,editor,edits,notices,select,type,render,get model(){return model;},close:()=>dom.window.close()};
@@ -90,11 +90,11 @@ test('live arrows traverse source markers, paragraphs and whole emoji without ch
   a.select(4);key('ArrowLeft');assert.equal(a.editor.readSelection().focus,3);a.type(null,'deleteContentBackward');assert.equal(a.input.value,'.방\n@민서 ^\n가😊나');a.editor.history(-1);assert.equal(a.input.value,'.방\n\n@민서 ^\n가😊나');a.close();
 });
 
-test('live notes are hidden until reached, editable at their own source range and hide again',()=>{
-  const source='앞[[메모]]뒤\n\n/* 숨김\n여러 줄 */\n\n끝',a=app(source,'source');assert.ok(!a.main.textContent.includes('메모'));assert.ok(!a.main.textContent.includes('여러 줄'));
+test('visible square notes stay editable while boneyard still reveals only at the caret',()=>{
+  const source='앞[[메모]]뒤\n\n/* 숨김\n여러 줄 */\n\n끝',a=app(source,'source',{showNotes:true});assert.ok(a.main.textContent.includes('메모'));assert.ok(!a.main.textContent.includes('여러 줄'));
   a.select(3,5);assert.match(a.main.textContent,/\[\[메모\]\]/);a.type('수정');assert.match(a.input.value,/앞\[\[수정\]\]뒤/);
   const pos=a.input.value.indexOf('여러 줄');a.select(pos,pos+4);assert.match(a.main.textContent,/여러 줄/);a.type('교체');assert.match(a.input.value,/\/\* 숨김\n교체 \*\//);
-  a.select(a.input.value.length);assert.ok(!a.main.textContent.includes('수정'));assert.ok(!a.main.textContent.includes('교체'));a.close();
+  a.select(a.input.value.length);assert.ok(a.main.textContent.includes('수정'));assert.ok(!a.main.textContent.includes('교체'));a.close();
 });
 
 test('live Korean composition and cancellation do not replace the active element or add partial edits',()=>{
@@ -115,4 +115,38 @@ test('live cross-paragraph paste, delete and shortcuts share undo and final expo
   const a=app('.방\n\n@민서\n원래','source');a.main.dispatchEvent(new a.dom.window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'a',ctrlKey:true}));a.type('.바깥\n\n@도윤\n새 대사','insertFromPaste');assert.equal(a.input.value,'.바깥\n\n@도윤\n새 대사');
   const start=a.input.value.indexOf('새 대사');a.select(start,start+4);a.editor.mark('**');assert.match(a.input.value,/\*\*새 대사\*\*/);a.select(start+2,start+6);a.type('최종');
   a.editor.finish();assert.equal(a.main.querySelectorAll('.preview-syntax').length,0);assert.match(exportReadableText(a.model),/최종/);const zip=unzipSync(new Uint8Array(await docxBuffer(a.model,'최종',a.model.settings)));assert.match(strFromU8(zip['word/document.xml']),/최종/);a.editor.history(-1);assert.match(a.input.value,/새 대사/);a.close();
+});
+
+for(const mode of ['source','full']){
+  test(mode+': blank dialogue continuation keeps its container before typing and exits on second Enter',()=>{
+    const a=app('@민서\n첫 대사',mode);a.select(a.input.value.length);a.type(null,'insertParagraph');
+    let slot=a.main.querySelector('[data-insertion="9"]');assert.ok(slot.classList.contains('dialogue'));assert.ok(slot.parentElement.classList.contains('dialogue-block'));
+    a.type('둘째 대사');assert.equal(a.main.querySelector('.dialogue').textContent,'첫 대사\n둘째 대사');
+    a.type(null,'insertParagraph');a.type(null,'insertParagraph');slot=a.main.querySelector('[data-insertion="'+a.input.value.length+'"]');assert.equal(slot.parentElement,a.main);
+    a.type('지문');assert.equal(a.main.querySelector('.action').textContent,'지문');a.editor.history(-1);a.type(null,'deleteContentBackward');
+    slot=a.main.querySelector('[data-insertion="'+a.input.value.length+'"]');assert.ok(slot.parentElement.classList.contains('dialogue-block'));a.close();
+  });
+  test(mode+': separator stays after the previous speaker, including both dual columns',()=>{
+    const source='@민서\n왼쪽\n\n@도윤 ^\n오른쪽\n',a=app(source,mode);
+    const left=a.main.querySelector('.dual-left'),right=a.main.querySelector('.dual-right');
+    assert.equal(a.main.querySelector('[data-insertion="7"]').parentElement,left);
+    assert.equal(a.main.querySelector('[data-insertion="'+source.length+'"]').parentElement,right);a.close();
+    const b=app('@민서\n(작게)\n',mode);assert.ok(b.main.querySelector('[data-insertion]').classList.contains('dialogue'));b.close();
+  });
+  test(mode+': hidden square notes never reveal and survive replacement and deletion',()=>{
+    const source='앞[[메모]]뒤\n\n[[따로]]',a=app(source,mode);a.select(3,5);assert.ok(!a.main.textContent.includes('메모'));
+    a.select(0,source.length);a.type('교체');assert.equal(a.input.value,'교체[[메모]][[따로]]');a.editor.history(-1);
+    a.select(7);a.type(null,'deleteContentBackward');assert.equal(a.input.value,'[[메모]]뒤\n\n[[따로]]');a.close();
+  });
+  test(mode+': shown inline and standalone notes can be edited, but never exported',async()=>{
+    const a=app('앞[[메모]]뒤\n\n[[따로]]',mode,{showNotes:true});assert.match(a.main.textContent,/\[\[따로\]\]/);
+    a.select(3,5);a.type('수정');assert.equal(a.input.value,'앞[[수정]]뒤\n\n[[따로]]');assert.ok(!exportReadableText(a.model).includes('수정'));
+    const zip=unzipSync(new Uint8Array(await docxBuffer(a.model,'메모',a.model.settings)));const xml=strFromU8(zip['word/document.xml']);assert.ok(!xml.includes('수정'));assert.ok(!xml.includes('따로'));a.close();
+  });
+}
+test('hidden note keyboard navigation skips the complete range and source callbacks do not change history',()=>{
+  const calls=[],a=app('앞[[메모]]뒤','source',{onSelection:s=>calls.push(s)});a.select(0);
+  a.main.dispatchEvent(new a.dom.window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'ArrowRight'}));assert.equal(a.editor.readSelection().focus,7);assert.equal(calls.at(-1).focus,7);
+  a.main.dispatchEvent(new a.dom.window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'ArrowLeft'}));assert.equal(a.editor.readSelection().focus,1);
+  a.editor.history(-1);assert.equal(a.input.value,'앞[[메모]]뒤');a.close();
 });

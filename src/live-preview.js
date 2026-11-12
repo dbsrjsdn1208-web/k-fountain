@@ -18,25 +18,25 @@ export function captureBlock(doc,el,rec){
   return {el,rec,units,generated,signature:null};
 }
 
-export function projectBlock(block,source,selection,notes){
+export function projectBlock(block,source,selection,notes,{live=true,showNotes=false,pendingLine=null}={}){
   const {rec,units}=block,pairs=rec.formatPairs||[],runs=[];
   const add=(text,start,end,classes='')=>{const last=runs.at(-1);if(last&&last.classes===classes){last.text+=text;last.map.push(...Array.from({length:text.length},(_,i)=>end-start===text.length?[start+i,start+i+1]:[start,end]));}else runs.push({text,classes,map:Array.from({length:text.length},(_,i)=>end-start===text.length?[start+i,start+i+1]:[start,end])});};
   if(block.generated)add(block.generated,rec.sourceStart,rec.sourceStart,'preview-number');
   const selectedPairs=pairs.filter(p=>touches(selection,p.open[0],p.close[1]));
   for(let i=rec.rawStart;i<rec.rawEnd;){
     const note=notes.find(([a,b])=>i>=a&&i<b);
-    if(note){const end=Math.min(note[1],rec.rawEnd);if(touches(selection,...note))add(source.slice(i,end),i,end,'preview-syntax preview-note');i=end;continue;}
+    if(note){const end=Math.min(note[1],rec.rawEnd);if(source.startsWith('[[',note[0])?showNotes:live&&touches(selection,...note))add(source.slice(i,end),i,end,'preview-note');i=end;continue;}
     const unit=units.get(i);
     if(unit){
-      if(unit.end-i>unit.text.length&&touches(selection,i,unit.end)){
+      if(unit.end-i>unit.text.length&&live&&touches(selection,i,unit.end)){
         const raw=source.slice(i,unit.end),extra=raw.length-unit.text.length;add(raw.slice(0,extra),i,i+extra,('preview-syntax '+unit.styles).trim());add(unit.text,i+extra,unit.end,unit.styles);
       }else add(unit.text,i,unit.end,unit.styles);
       i=unit.end;continue;
     }
     const pair=pairs.find(p=>i>=p.open[0]&&i<p.open[1]||i>=p.close[0]&&i<p.close[1]);
     let show=false,styles='';
-    if(pair){show=selectedPairs.includes(pair);styles=units.get(pair.open[1])?.styles||'';}
-    else show=touches(selection,lineAt(source,i),lineEnd(source,i));
+    if(pair){show=live&&selectedPairs.includes(pair);styles=units.get(pair.open[1])?.styles||'';}
+    else show=live?touches(selection,lineAt(source,i),lineEnd(source,i)):pendingLine!==null&&lineAt(source,i)===pendingLine;
     if(show)add(source[i],i,i+1,('preview-syntax '+styles).trim());
     else if(source[i]==='\n')add('\n',i,i+1);
     i++;

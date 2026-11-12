@@ -74,7 +74,11 @@ function parse(fountainText, options = {}) {
   input=replace(input,RE.LINE_BREAKS,(m,c)=>literal('\n',[c(0).map[0][0],c(0).map.at(-1)[1]]));
   input=replace(input,RE.BONEYARD,(m,c)=>remove(c(0),/[^\n]/g));
   const blocks=[];let at=0;
-  for(const m of input.text.matchAll(RE.SPLITTER)){blocks.push(slice(input,at,m.index));at=m.index+m[0].length;}
+  const notes=[...input.text.matchAll(/\[\[[\s\S]*?\]\]/g)].map(m=>[m.index,m.index+m[0].length]);
+  for(const m of input.text.matchAll(RE.SPLITTER)){
+    if(notes.some(([a,b])=>m.index>=a&&m.index<b))continue;
+    blocks.push(slice(input,at,m.index));at=m.index+m[0].length;
+  }
   blocks.push(slice(input,at));
   const tokenList=[],original=options.sourceText??fountainText,lineStarts=[0];
   for(const m of original.matchAll(/\r\n|\r|\n/g))lineStarts.push(m.index+m[0].length);
@@ -134,7 +138,7 @@ function parse(fountainText, options = {}) {
     }
     if((found=match(block,RE.SECTION))){push(TokenType.SECTION,trim(found.c(2)),{depth:found.m[1].length});continue;}
     if((found=match(block,RE.SYNOPSIS))){push(TokenType.SYNOPSIS,trim(found.c(1)));continue;}
-    if((found=match(trim(block),RE.NOTE))){push(TokenType.NOTE,trim(found.c(1)));continue;}
+    if((found=match(trim(block),RE.NOTE))){const note=found.c(0);push(TokenType.NOTE,trim(found.c(1)),{note,rawStart:note.map[0]?.[0]??blockStart,rawEnd:note.map.at(-1)?.[1]??blockStart});continue;}
     if(RE.PAGE_BREAK.test(block.text)){push(TokenType.PAGE_BREAK);continue;}
     if(RE.TWO_SPACES_LINE_BREAK.test(block.text)){push(TokenType.LINE_BREAK);continue;}
     const action=remove(raw,/^!/);if(action.text)push(TokenType.ACTION,action);
