@@ -95,3 +95,9 @@ test('TXT keeps dialogue lines adjacent and uses selected numbering',()=>{
   const e=parseScreenplay('.방\n\n@민서\n첫 줄\n둘째 줄',[],{txtNumbering:'n.'});
   assert.match(exportReadableText(e),/^1\. 방\n\n민서\n첫 줄\n둘째 줄$/);
 });
+
+test('previous disk content is backed up before writing and backup failure stops overwrite',async()=>{
+ const h=fakeHandle('old.fountain');h.data='복구할 원본';h.getFile=async()=>({text:async()=>h.data});const session=new FileSession({});session.handle=h;let saved;
+ session.beforeWrite=async entry=>{saved=entry;assert.equal(h.writes,0);};await session.save('수정','old.fountain');assert.equal(saved.text,'복구할 원본');assert.equal(h.data,'수정');
+ session.beforeWrite=async()=>{throw Error('backup failed');};await assert.rejects(session.save('덮어쓰기','old.fountain'),/backup failed/);assert.equal(h.data,'수정');
+});

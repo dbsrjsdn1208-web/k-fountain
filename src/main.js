@@ -50,6 +50,15 @@ const input=$('#fountain-editor'),frame=$('#preview');input.value=state.text;
 const sourceEdits=new SourceEdits(input.value);
 let navigationSnapshot=null,suppressFollow=false;
 function toast(message){clearTimeout(toastTimer);$('#toast').textContent=message;$('#toast').classList.add('visible');toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),5000);}
+function preserveRecovery(entry){
+  const key='k-fountain.history.v1';let saved;
+  try{saved=JSON.parse(localStorage.getItem(key)||'[]');if(!Array.isArray(saved))throw Error();}
+  catch{throw Error('복구 기록을 읽을 수 없어 안전을 위해 저장을 중단했습니다.');}
+  if(saved.at(-1)?.text===entry.text&&saved.at(-1)?.title===entry.title)return;
+  saved.push({...entry,at:new Date().toISOString()});saved=saved.slice(-30);
+  for(;;){try{localStorage.setItem(key,JSON.stringify(saved));return;}catch{if(saved.length<=1)throw Error('덮어쓰기 전 복구본을 보관할 공간이 없습니다. 다른 이름으로 저장해 주세요.');saved.shift();}}
+}
+files.beforeWrite=preserveRecovery;
 function snapshot(){return {text:input.value,start:input.selectionStart,end:input.selectionEnd};}
 function resetHistory(){history=[snapshot()];historyIndex=0;lastEditTime=0;}
 function record(type='command'){
@@ -174,16 +183,18 @@ document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&e
 function filename(){return (state.title.trim()||'제목 없는 시나리오').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\.fountain$/i,'');}
 function download(data,name,type='text/plain;charset=utf-8'){const blob=data instanceof Blob?data:new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 async function saveFile(as=false){
+  if(files.busy){toast('저장이 진행 중입니다. 완료 후 다시 시도해 주세요.');return false;}
   if(!previewEditor.finish())return false;
   if(composing){toast('한글 입력을 마친 뒤 저장해 주세요.');return false;}
   normalize();record('normalize');changed();const text=input.value;
   try{
-    if(files.supported){await files.save(text,filename()+'.fountain',as);state.title=files.handle.name.replace(/\.fountain$/i,'');$('#title').value=state.title;handleDB('put',files.handle).catch(()=>{});}
+    if(files.supported){await files.save(text,filename()+'.fountain',as||!!files.handle&&state.title!==files.handle.name.replace(/\.fountain$/i,''));state.title=files.handle.name.replace(/\.fountain$/i,'');$('#title').value=state.title;handleDB('put',files.handle).catch(()=>{});}
     else{download(text,filename()+'.fountain');files.lastSaved=text;toast('다운로드했습니다. 같은 파일 덮어쓰기는 Chrome·Edge에서 지원됩니다.');}
     dirty=input.value!==files.lastSaved;updateStatus();saveRecovery();return true;
   }catch(error){if(error.name!=='AbortError')toast('저장하지 못했습니다. '+error.message);return false;}
 }
 async function confirmReplace(){
+  if(files.busy){toast('저장이 진행 중입니다. 완료 후 문서를 바꿔 주세요.');return false;}
   if(!previewEditor.finish())return false;
   if(!dirty&&files.lastSaved!==null)return true;
   const dialog=$('#replace-dialog');dialog.returnValue='cancel';dialog.showModal();
@@ -191,7 +202,7 @@ async function confirmReplace(){
   return decision==='discard'||decision==='save'&&await saveFile();
 }
 document.querySelectorAll('[data-decision]').forEach(b=>b.onclick=()=>$('#replace-dialog').close(b.dataset.decision));
-function setDocument(next,handle=null,saved=null){state=validate(next);input.value=state.text;sourceEdits.reset(input.value);lastPreviewSelection=null;navigationSnapshot=null;suppressFollow=false;files.handle=handle;files.lastSaved=saved;dirty=saved!==input.value;$('#title').value=state.title;resetHistory();previewText=null;syncSettings();changed();input.scrollTop=0;frame.contentWindow.scrollTo(0,0);if(handle)handleDB('put',handle).catch(()=>{});else handleDB('delete').catch(()=>{});}
+function setDocument(next,handle=null,saved=null){if(files.busy)throw Error('저장이 진행 중입니다. 완료 후 문서를 바꿔 주세요.');const validated=validate(next);if(input.value)preserveRecovery({title:state.title,text:input.value});state=validated;input.value=state.text;sourceEdits.reset(input.value);lastPreviewSelection=null;navigationSnapshot=null;suppressFollow=false;files.handle=handle;files.lastSaved=saved;dirty=saved!==input.value;$('#title').value=state.title;resetHistory();previewText=null;syncSettings();changed();input.scrollTop=0;frame.contentWindow.scrollTo(0,0);if(handle)handleDB('put',handle).catch(()=>{});else handleDB('delete').catch(()=>{});}
 async function load(file,text,handle=null){
   if(file.size>10*1024*1024)throw Error('10MB 이하의 파일을 선택해 주세요.');
   const next=/\.json$/i.test(file.name)?validate(JSON.parse(text)):{...state,text:normalizeNewlines(text),title:file.name.replace(/\.[^.]+$/,'')};
@@ -201,7 +212,7 @@ $('#open').onclick=async()=>{try{if(window.showOpenFilePicker){const picked=awai
 $('#file-input').onchange=async event=>{try{const file=event.target.files[0];if(file)await load(file,await file.text());}catch(e){toast(e.message);}event.target.value='';};
 input.addEventListener('dragover',e=>e.preventDefault());
 input.addEventListener('drop',async e=>{if(!e.dataTransfer.files.length)return;e.preventDefault();try{const file=e.dataTransfer.files[0];await load(file,await file.text());}catch(error){toast(error.message);}});
-$('#new').onclick=async()=>{if(await confirmReplace()){setDocument({...state,text:'',title:'제목 없는 시나리오'});input.focus();}};
+$('#new').onclick=async()=>{try{if(await confirmReplace()){setDocument({...state,text:'',title:'제목 없는 시나리오'});input.focus();}}catch(e){toast(e.message);}};
 $('#save').onclick=()=>saveFile();$('#save-as').onclick=()=>saveFile(true);
 $('#title').oninput=e=>{state.title=e.target.value;updateStatus();queueRecovery();};
 function syncSettings(){
@@ -255,4 +266,5 @@ for(const doc of [document,previewDoc])doc.addEventListener('compositionend',()=
 previewDoc.addEventListener('pointerdown',()=>viewControls.close());
 resetHistory();syncSettings();renderNow();
 if(recoveryProblem)toast('기존 복구본을 읽지 못했습니다. 기존 데이터는 보존되어 있습니다.');else saveRecovery();
-if(recovered){const startupRevision=revision;handleDB('get').then(async handle=>{if(!handle||revision!==startupRevision)return;files.handle=handle;try{if(await handle.queryPermission({mode:'read'})==='granted'){const text=normalizeNewlines(await (await handle.getFile()).text());if(revision===startupRevision)files.lastSaved=text;}}catch{}dirty=files.lastSaved!==input.value;updateStatus();}).catch(()=>{});}
+// Recovered text must never silently reconnect to a separately persisted file handle.
+// The first save after reopening always asks for a destination.

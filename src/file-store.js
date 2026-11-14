@@ -1,5 +1,5 @@
 export class FileSession {
-  constructor(api=globalThis){this.api=api;this.handle=null;this.lastSaved=null;this.busy=false;}
+  constructor(api=globalThis){this.api=api;this.handle=null;this.lastSaved=null;this.busy=false;this.beforeWrite=null;}
   get supported(){return typeof this.api.showSaveFilePicker==='function';}
   async open(){
     const [handle]=await this.api.showOpenFilePicker({types:[{description:'Fountain 원고',accept:{'text/plain':['.fountain','.txt']}}],multiple:false});
@@ -13,6 +13,7 @@ export class FileSession {
       if(handle.queryPermission&&await handle.queryPermission({mode:'readwrite'})!=='granted'){
         if(await handle.requestPermission({mode:'readwrite'})!=='granted')throw Error('파일 저장 권한이 필요합니다. 다시 저장하거나 다른 이름으로 저장해 주세요.');
       }
+      if(this.beforeWrite&&handle.getFile){const old=await handle.getFile();const previous=await old.text();if(previous&&previous!==text)await this.beforeWrite({title:handle.name,text:previous});}
       const stream=await handle.createWritable();
       try{await stream.write(text);await stream.close();}catch(error){try{await stream.abort();}catch{}throw error;}
       this.handle=handle;this.lastSaved=text;return handle;

@@ -10,7 +10,7 @@ async function app(){
   const w=dom.window;w.matchMedia=()=>({matches:false,addEventListener(){}});w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(value=''){this.returnValue=value;this.open=false;this.dispatchEvent(new w.Event('close'));};
   let writes=[],picks=0;const handle={name:'test.fountain',async queryPermission(){return 'granted';},async createWritable(){return {async write(text){writes.push(text);},async close(){},async abort(){}};}};
   w.showSaveFilePicker=async()=>{picks++;return handle;};w.eval(compiled.outputFiles[0].text);
-  const q=s=>w.document.querySelector(s),input=q('#fountain-editor');
+  const q=s=>w.document.querySelector(s),input=q('#fountain-editor');q('#preview').contentWindow.Range.prototype.getBoundingClientRect=()=>({top:0,bottom:0,height:0});
   const edit=(text,type='insertText',composition=false)=>{input.dispatchEvent(new w.InputEvent('beforeinput',{inputType:type,bubbles:true}));input.value=text;input.setSelectionRange(text.length,text.length);input.dispatchEvent(new w.InputEvent('input',{inputType:type,bubbles:true,isComposing:composition}));};
   const flush=()=>new Promise(r=>w.setTimeout(r,40));
   return {dom,w,q,input,edit,flush,errors,writes,get picks(){return picks;}};
@@ -97,5 +97,23 @@ test('notes toggle renders in reading and editing modes without altering source'
   a.q('#show-notes').checked=true;a.q('#show-notes').dispatchEvent(new a.w.Event('change'));await a.flush();assert.match(d.querySelector('main').textContent,/메모 끝/);
   a.q('#preview-edit').click();assert.match(d.querySelector('main').textContent,/메모 끝/);
   a.q('#show-notes').checked=false;a.q('#show-notes').dispatchEvent(new a.w.Event('change'));await a.flush();assert.ok(!d.querySelector('main').textContent.includes('메모'));assert.equal(a.input.value,text);assert.deepEqual(a.errors,[]);
+ }finally{a.dom.window.close();}
+});
+
+test('new document detaches the previous destination and saves with a fresh picker',async()=>{
+ const a=await app();try{a.edit('이전 원고');await a.q('#save').onclick();const before=a.picks;
+ await a.q('#new').onclick();assert.equal(a.input.value,'');assert.equal(a.q('#title').value,'제목 없는 시나리오');
+ a.edit('새 원고');await a.q('#save').onclick();assert.equal(a.picks,before+1);assert.equal(JSON.parse(a.w.localStorage.getItem('k-fountain.history.v1'))[0].text,'이전 원고');
+ }finally{a.dom.window.close();}
+});
+test('changing the title requests a new destination instead of silently overwriting',async()=>{
+ const a=await app();try{a.edit('이전 원고');await a.q('#save').onclick();const before=a.picks;
+ a.q('#title').value='?';a.q('#title').dispatchEvent(new a.w.Event('input'));a.edit('다른 내용');await a.q('#save').onclick();assert.equal(a.picks,before+1);
+ }finally{a.dom.window.close();}
+});
+test('new document cannot replace the manuscript while a save picker is pending',async()=>{
+ const a=await app();try{a.edit('저장 중 원고');let release;a.w.showSaveFilePicker=()=>new Promise(resolve=>release=resolve);
+ const saving=a.q('#save').onclick();await a.q('#new').onclick();assert.equal(a.input.value,'저장 중 원고');
+ release({name:'pending.fountain',async createWritable(){return {async write(){},async close(){}};}});await saving;assert.equal(a.q('#title').value,'pending');
  }finally{a.dom.window.close();}
 });
