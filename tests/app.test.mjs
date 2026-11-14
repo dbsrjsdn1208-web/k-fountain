@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {JSDOM,VirtualConsole} from 'jsdom';
+import {unzipSync,strFromU8} from 'fflate';
 const compiled=await build({entryPoints:['src/main.js'],bundle:true,format:'iife',write:false,plugins:[{name:'omit-styles',setup(b){b.onLoad({filter:/\.css$/},()=>({contents:'',loader:'js'}));}}]});
 async function app(){
   // jsdom does not implement upstream's nested @page rules; browser QA checks layout.
@@ -116,4 +117,89 @@ test('new document cannot replace the manuscript while a save picker is pending'
  const saving=a.q('#save').onclick();await a.q('#new').onclick();assert.equal(a.input.value,'저장 중 원고');
  release({name:'pending.fountain',async createWritable(){return {async write(){},async close(){}};}});await saving;assert.equal(a.q('#title').value,'pending');
  }finally{a.dom.window.close();}
+});
+
+test('B file then New then title A then Ctrl+S leaves B intact and keeps title A',async()=>{
+ const a=await app();try{
+  const disk={B:'B 원고',A:''},suggested=[];
+  const handle=name=>({name:name+'.fountain',async getFile(){return {async text(){return disk[name];}};},async createWritable(){return {async write(text){disk[name]=text;},async close(){}};}});
+  a.w.showSaveFilePicker=async options=>{suggested.push(options.suggestedName);return handle(suggested.length===1?'B':'A');};
+  a.edit('B 원고');await a.q('#save').onclick();assert.equal(a.q('#title').value,'B');
+  await a.q('#new').onclick();
+  a.q('#title').value='A';a.q('#title').dispatchEvent(new a.w.Event('input'));a.edit('A 새 원고');
+  const event=new a.w.KeyboardEvent('keydown',{key:'s',ctrlKey:true,bubbles:true,cancelable:true});a.input.dispatchEvent(event);await a.flush();
+  assert.equal(event.defaultPrevented,true);assert.equal(suggested.length,2);assert.equal(suggested[1],'A.fountain');
+  assert.equal(disk.B,'B 원고');assert.equal(disk.A,'A 새 원고');assert.equal(a.q('#title').value,'A');assert.deepEqual(a.errors,[]);
+ }finally{a.dom.window.close();}
+});
+
+test('source edits appear immediately and preserve untouched preview paragraphs',async()=>{
+ const a=await app();try{
+  a.edit('첫 문단\n\n둘째 문단');const d=a.q('#preview').contentDocument,first=d.querySelector('.action'),text=first.firstChild;
+  a.edit('첫 문단\n\n둘째 문단 수정');assert.match(d.querySelector('main').textContent,/수정/);
+  assert.equal(d.querySelector('.action'),first);assert.equal(first.firstChild,text);
+  a.q('#preview-edit').click();const liveText=first.firstChild;
+  a.edit('첫 문단\n\n둘째 문단 추가');assert.equal(first.firstChild,liveText);
+  a.q('#preview-edit').click();assert.equal(d.querySelector('main').contentEditable,'false');assert.deepEqual(a.errors,[]);
+ }finally{a.w.close();}
+});
+
+for(const mode of ['source','full'])test(`${mode}: IME draft syncs immediately, retains DOM and commits one undo step`,async()=>{
+ const a=await app();try{
+  a.edit('첫 문단\n\n@민서\n원래 대사');a.q('#preview-edit-mode').value=mode;a.q('#preview-edit-mode').dispatchEvent(new a.w.Event('change'));a.q('#preview-edit').click();
+  const d=a.q('#preview').contentDocument,m=d.querySelector('main'),p=d.querySelector('.dialogue'),node=p.lastChild.firstChild,first=d.querySelector('.action').firstChild;
+  d.getSelection().setBaseAndExtent(node,node.length,node,node.length);d.dispatchEvent(new d.defaultView.Event('selectionchange'));
+  const original=a.input.value;
+  m.dispatchEvent(new d.defaultView.CompositionEvent('compositionstart',{bubbles:true}));
+  for(const data of ['ㅎ','하','한']){m.dispatchEvent(new d.defaultView.InputEvent('input',{bubbles:true,inputType:'insertCompositionText',data,isComposing:true}));assert.equal(a.input.value,original+data);assert.equal(d.querySelector('.dialogue'),p);}
+  m.dispatchEvent(new d.defaultView.CompositionEvent('compositionend',{bubbles:true,data:'한'}));
+  assert.equal(a.input.value,original+'한');assert.match(d.querySelector('.dialogue').textContent,/대사한/);assert.equal(d.querySelector('.action').firstChild,first);
+  m.dispatchEvent(new d.defaultView.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));assert.equal(a.input.value,original);
+  const end=d.querySelector('.dialogue').lastChild.firstChild;d.getSelection().setBaseAndExtent(end,end.length,end,end.length);d.dispatchEvent(new d.defaultView.Event('selectionchange'));
+  m.dispatchEvent(new d.defaultView.CompositionEvent('compositionstart',{bubbles:true}));m.dispatchEvent(new d.defaultView.InputEvent('input',{bubbles:true,data:'취',isComposing:true}));
+  m.dispatchEvent(new d.defaultView.CompositionEvent('compositionend',{bubbles:true,data:''}));assert.equal(a.input.value,original);assert.deepEqual(a.errors,[]);
+ }finally{a.w.close();}
+});
+
+test('saving does not overwrite a title edited during the write',async()=>{
+ const a=await app();try{
+  let release;a.w.showSaveFilePicker=async()=>({name:'B.fountain',async createWritable(){return {write:()=>new Promise(r=>release=r),async close(){}};}});
+  a.edit('B');const saving=a.q('#save').onclick();await a.flush();a.q('#title').value='A';a.q('#title').dispatchEvent(new a.w.Event('input'));release();await saving;assert.equal(a.q('#title').value,'A');
+ }finally{a.w.close();}
+});
+
+test('Save and continue stops document replacement if new input arrives during writing',async()=>{
+ const a=await app();try{
+  a.edit('원래 원고');await a.q('#save').onclick();a.edit('저장할 수정');
+  let release;a.w.showSaveFilePicker=async()=>({name:'B.fountain',async createWritable(){return {write:()=>new Promise(r=>release=r),async close(){}};}});
+  a.q('#title').value='B';a.q('#title').dispatchEvent(new a.w.Event('input'));
+  const switching=a.q('#new').onclick();await a.flush();a.q('#replace-dialog').close('save');await a.flush();a.edit('저장 중 추가한 글');release();await switching;
+  assert.equal(a.input.value,'저장 중 추가한 글');assert.match(a.q('#toast').textContent,/현재 문서를 유지/);
+ }finally{a.w.close();}
+});
+
+test('DOCX captures one manuscript before awaiting the destination',async()=>{
+ const a=await app();try{
+  Object.assign(a.w,{Blob,TextEncoder,TextDecoder,setImmediate,clearImmediate});let release,blob;
+  a.edit('처음 내보낸 내용');a.w.showSaveFilePicker=()=>new Promise(r=>release=r);const exporting=a.q('#docx').onclick();await a.flush();a.edit('내보내기 중 작성한 다른 글');
+  release({async createWritable(){return {async write(value){blob=value;},async close(){}};}});await exporting;
+  const xml=strFromU8(unzipSync(new Uint8Array(await blob.arrayBuffer()))['word/document.xml']);
+  assert.match(xml,/처음 내보낸 내용/);assert.ok(!xml.includes('다른 글'));assert.equal(a.input.value,'내보내기 중 작성한 다른 글');
+ }finally{a.w.close();}
+});
+
+test('reading preview Ctrl+S saves the manuscript rather than the browser page',async()=>{
+ const a=await app();try{
+  a.edit('단축키 저장');const d=a.q('#preview').contentDocument,event=new d.defaultView.KeyboardEvent('keydown',{key:'s',ctrlKey:true,bubbles:true,cancelable:true});d.querySelector('main').dispatchEvent(event);await a.flush();
+  assert.equal(event.defaultPrevented,true);assert.deepEqual(a.writes,['단축키 저장']);
+ }finally{a.w.close();}
+});
+
+test('cached preview survives line insertion, page breaks and mode changes',async()=>{
+ const a=await app();try{
+  a.edit('첫 문단\n\n===\n\n끝 문단');a.q('#preview-edit').click();const d=a.q('#preview').contentDocument;
+  for(const text of ['첫 문단 수정\n\n===\n\n끝 문단','첫 문단 수정\n\n추가\n\n===\n\n끝 문단','첫 문단 수정\n\n추가\n\n===\n\n마지막'])a.edit(text);
+  assert.match(d.querySelector('main').textContent,/마지막/);a.q('#preview-edit').click();assert.ok(d.querySelector('hr'));assert.equal(d.querySelectorAll('[data-insertion]').length,0);
+  assert.equal(d.querySelectorAll('.action').length,3);assert.deepEqual(a.errors,[]);
+ }finally{a.w.close();}
 });

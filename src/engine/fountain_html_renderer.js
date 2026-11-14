@@ -32,9 +32,7 @@ const INLINE_RE = {
 
 // Inline HTML snippets to replace fountain syntax.
 //
-// TODO: Add support for escaped emphasis tags like '\*'.
 //
-// TODO: Support space before or after the emphasis tag like '*6 *9' or '6* 9*'.
 //
 const INLINE_HTML = {
   BOLD_ITALIC_UNDERLINE: '<span class="bold italic underline">$2</span>',

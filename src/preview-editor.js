@@ -27,7 +27,8 @@ export function deletionRange(text,pos,backward){
 }
 
 export const editorCSS=`
-main.preview-writing{outline:none;caret-color:currentColor;min-height:70vh;}
+main.preview-writing{outline:none;caret-color:currentColor;min-height:70vh;cursor:text;}
+.peer-caret[hidden]{display:none!important;}
 .preview-raw{display:block;box-sizing:border-box;width:100%;min-height:3em;resize:none;font:inherit;line-height:1.5;white-space:pre-wrap;border:1px solid #3594cf;border-radius:3px;padding:8px;color:inherit;background:transparent;caret-color:currentColor;}
 .preview-slot{min-height:1.5em;white-space:pre-wrap;margin:0;}
 .preview-number{user-select:none;}
@@ -38,12 +39,13 @@ main.preview-writing{outline:none;caret-color:currentColor;min-height:70vh;}
 .preview-writing [data-token]{white-space:pre-wrap;}
 .preview-writing:empty:before{content:'여기에 Fountain으로 작성하세요';opacity:.45;}
 @media screen{.preview-writing .action,.preview-writing .screen-heading,.preview-writing .transition{margin-top:0;margin-bottom:0;}.preview-writing .character{margin-top:0;}}
-@media print{.preview-slot,.preview-raw,.preview-syntax,.preview-note{display:none!important;}.preview-page-break{break-after:page;visibility:hidden;}[data-raw-hidden]{display:revert!important;}}
+@media print{.peer-caret,.preview-slot,.preview-raw,.preview-syntax,.preview-note{display:none!important;}.preview-page-break{break-after:page;visibility:hidden;}[data-raw-hidden]{display:revert!important;}}
 `;
 
 export class PreviewEditor{
-  constructor({doc,input,getSnapshot,edits,getMode,getShowNotes=()=>false,onSelection=()=>{},apply,remember,undo,refresh,notify,save}){
-    Object.assign(this,{doc,input,getSnapshot,edits,getMode,getShowNotes,onSelection,apply,remember,undo,refresh,notify,save});
+  constructor({doc,input,getSnapshot,edits,getMode,getShowNotes=()=>false,onSelection=()=>{},onComposition=()=>{},apply,remember,undo,refresh,notify,save}){
+    Object.assign(this,{doc,input,getSnapshot,edits,getMode,getShowNotes,onSelection,onComposition,apply,remember,undo,refresh,notify,save});
+    this.blockCache=new WeakMap();
     this.main=doc.querySelector('main');this.enabled=false;this.composing=false;this.selection=null;this.points=[];this.pendingLine=null;
     doc.addEventListener('click',e=>this.click(e));
     doc.addEventListener('pointerdown',()=>{this.lastRestored=null;this.dragging=true;});
@@ -52,15 +54,18 @@ export class PreviewEditor{
     doc.addEventListener('keydown',e=>this.key(e));
     doc.addEventListener('paste',e=>this.paste(e));
     doc.addEventListener('cut',e=>this.cut(e));
-    doc.addEventListener('drop',e=>{if(this.full()){e.preventDefault();this.insert(e.dataTransfer.getData('text/plain'),'insertFromDrop');}});
-    doc.addEventListener('dragover',e=>{if(this.full())e.preventDefault();});
-    doc.addEventListener('compositionstart',e=>{if(!this.enabled)return;this.composing=true;this.compositionSelection=this.full()?this.readSelection():null;this.compositionVersion=this.edits.version;});
-    doc.addEventListener('compositionend',e=>{if(!this.enabled)return;this.composing=false;
-      if(this.full()&&this.compositionSelection){this.selection=this.compositionSelection;if(e.data)this.insert(e.data,'composition',this.selection,this.compositionVersion);else this.refresh();this.compositionSelection=null;}
+    doc.addEventListener('drop',e=>{if(this.isEditing()){e.preventDefault();this.insert(e.dataTransfer.getData('text/plain'),'insertFromDrop');}});
+    doc.addEventListener('dragover',e=>{if(this.isEditing())e.preventDefault();});
+    doc.addEventListener('compositionstart',()=>{
+      if(!this.enabled)return;
+      this.composing=true;this.compositionSelection=this.readSelection();this.compositionVersion=this.edits.version;
+      this.compositionSource=this.input.value;this.compositionDraft=this.input.value;this.remember();
     });
+    doc.addEventListener('input',e=>{if(this.composing&&typeof e.data==='string')this.syncComposition(e.data);});
+    doc.addEventListener('compositionend',e=>this.endComposition(e.data));
     doc.addEventListener('selectionchange',()=>this.syncSelection());
   }
-  full(){return this.enabled;}
+  isEditing(){return this.enabled;}
   live(){return this.enabled&&this.getMode()!=='full';}
   busy(){return this.composing;}
   toggle(enabled){if(!this.finish())return false;this.enabled=enabled;this.selection=null;this.pendingLine=null;this.refresh();return true;}
@@ -71,17 +76,18 @@ export class PreviewEditor{
   click(e){
     if(!this.enabled||this.composing)return;
     const el=e.target.closest?.('[data-token], [data-insertion]');
-    if(this.full()){
+    if(this.isEditing()){
       if(e.target.closest?.('.preview-number')){const record=this.getSnapshot()?.records.get(el?.dataset.token);if(record){this.selection={anchor:record.sourceStart,focus:record.sourceStart};this.restoreSelection();}}
       if(this.pendingLine!==null){const s=this.readSelection();if(s&&this.input.value.lastIndexOf('\n',Math.max(0,s.focus-1))+1!==this.pendingLine){this.pendingLine=null;this.selection=s;this.refresh();}}
       this.syncSelection();
     }
   }
   // Rebuild only from the canonical rendered screenplay; never serialize arbitrary HTML.
-  decorate(){
-    this.main.classList.toggle('preview-writing',this.full());this.main.contentEditable=this.full()?'true':'false';
-    this.main.setAttribute('aria-label',this.live()?'대본 라이브 프리뷰':this.full()?'대본 직접 편집':'대본 미리보기');
-    this.main.setAttribute('role',this.full()?'textbox':'document');this.main.setAttribute('aria-multiline','true');
+  decorate(originals=null){
+    this.originals=originals;
+    this.main.classList.toggle('preview-writing',this.isEditing());this.main.contentEditable=this.isEditing()?'true':'false';
+    this.main.setAttribute('aria-label',this.live()?'대본 라이브 프리뷰':this.isEditing()?'대본 직접 편집':'대본 미리보기');
+    this.main.setAttribute('role',this.isEditing()?'textbox':'document');this.main.setAttribute('aria-multiline','true');
     this.main.spellcheck=false;
     this.points=[];this.spans=[];this.nodeMaps=new WeakMap();if(!this.enabled)return;
     this.decorateLive();
@@ -90,11 +96,11 @@ export class PreviewEditor{
   placeSlot(el,pos,ranges){
     const previous=ranges.findLast(b=>b.rec.rawEnd===pos-1);
     if(previous&&['character','dialogue','parenthetical'].includes(previous.rec.type)){
-      el.classList.add('dialogue');previous.el.after(el);return;
+      el.classList.add('dialogue');if(previous.el.nextElementSibling!==el)previous.el.after(el);return;
     }
     const next=ranges.find(b=>b.rec.rawStart>=pos);
-    if(next){let top=next.el;while(top.parentElement!==this.main)top=top.parentElement;top.before(el);}
-    else this.main.append(el);
+    if(next){let top=next.el;while(top.parentElement!==this.main)top=top.parentElement;if(top.previousElementSibling!==el)top.before(el);}
+    else if(this.main.lastElementChild!==el)this.main.append(el);
   }
   hiddenRanges(){return noteRanges(this.input.value).filter(([a])=>this.input.value.startsWith('[[',a)?!this.getShowNotes():!this.live());}
   skipHidden(pos,backward){
@@ -108,25 +114,31 @@ export class PreviewEditor{
     for(let el of this.main.querySelectorAll('[data-token]')){
       const rec=snap.records.get(el.dataset.token);if(!rec)continue;
       if(el.matches('hr,br')){const replacement=this.doc.createElement('p');for(const a of el.attributes)replacement.setAttribute(a.name,a.value);if(el.tagName==='HR')replacement.classList.add('preview-page-break');el.replaceWith(replacement);el=replacement;}
-      const block=captureBlock(this.doc,el,rec);
+      const prior=this.blockCache.get(el),canonical=this.originals?.get(el)||el;
+      const block=captureBlock(this.doc,canonical,rec);block.el=el;
+      if(prior&&!this.originals?.reset.has(el))block.signature=prior.signature;
+      this.blockCache.set(el,block);
       block.hidden=this.notes.some(([a,b])=>rec.rawStart>=a&&rec.rawEnd<=b);
       this.liveBlocks.push(block);
     }
-    const covered=this.liveBlocks.slice().sort((a,b)=>a.rec.rawStart-b.rec.rawStart);let pos=0;
+    const slots=new Map([...this.main.querySelectorAll('[data-insertion]')].map(el=>[+el.dataset.line,el]));
+    const covered=this.liveBlocks.slice().sort((a,b)=>a.rec.rawStart-b.rec.rawStart);let pos=0,cover=0,lineNumber=0;
     for(const line of source.split('\n')){
-      if(!covered.some(b=>pos>=b.rec.rawStart&&pos<b.rec.rawEnd)){
-        const el=this.doc.createElement('p');el.className='preview-slot';el.dataset.insertion=pos;
+      while(cover<covered.length&&covered[cover].rec.rawEnd<=pos)cover++;
+      if(!covered[cover]||pos<covered[cover].rec.rawStart){
+        const existing=slots.get(lineNumber),el=existing||this.doc.createElement('p');slots.delete(lineNumber);el.className='preview-slot';el.dataset.insertion=pos;el.dataset.line=lineNumber;
         const rec={rawStart:pos,rawEnd:pos+line.length,sourceStart:pos,sourceEnd:pos+line.length,map:[],formatPairs:[]};
         const note=this.notes.some(([a,b])=>pos>=a&&pos+line.length<=b);
-        const block={el,rec,units:new Map(),generated:'',signature:null,hidden:note};
-        this.placeSlot(el,pos,covered);this.liveBlocks.push(block);
-      }pos+=line.length+1;
+        const block={el,rec,units:new Map(),generated:'',signature:this.blockCache.get(el)?.signature??null,hidden:note};
+        this.blockCache.set(el,block);this.placeSlot(el,pos,covered);this.liveBlocks.push(block);
+      }pos+=line.length+1;lineNumber++;
     }
-    this.liveBlocks.sort((a,b)=>a.rec.rawStart-b.rec.rawStart);this.updateLive(false);
+    for(const el of slots.values())el.remove();
+    this.liveBlocks.sort((a,b)=>a.rec.rawStart-b.rec.rawStart);this.rebuildMaps=true;this.updateLive(false);
     if(this.selection)this.restoreSelection();
   }
   syncSelection(){
-    if(!this.full()||this.composing||this.updatingLive)return;const s=this.readSelection();if(!s)return;this.selection=s;
+    if(!this.isEditing()||this.composing||this.updatingLive)return;const s=this.readSelection();if(!s)return;this.selection=s;
     if(!this.dragging)this.updateLive();
     this.onSelection({...this.selection},this.getSnapshot()?.version);
   }
@@ -145,7 +157,8 @@ export class PreviewEditor{
       changed=paintBlock(this.doc,block,runs)||changed;
       block.el.classList.toggle('preview-hidden-slot',!!block.hidden&&!runs.some(r=>r.classes.includes('preview-note')));
     }
-    if(changed){
+    if(changed||this.rebuildMaps){
+      this.rebuildMaps=false;
       this.points=[];this.spans=[];this.nodeMaps=new WeakMap();
       for(const block of this.liveBlocks){
         if(block.el.classList.contains('preview-hidden-slot'))continue;
@@ -203,8 +216,25 @@ export class PreviewEditor{
     if(text.includes('\n'))this.pendingLine=null;else if(!this.live()&&a===lineStart&&/^[.@>#=~!]/.test(text))this.pendingLine=lineStart;
     this.apply(result.text,result.start,result.end,type,true);this.selection={anchor:this.input.selectionStart,focus:this.input.selectionEnd};this.refresh();
   }
+  syncComposition(text){
+    const s=this.compositionSelection;if(!s||this.edits.version!==this.compositionVersion)return;
+    const result=replaceVisible(this.compositionSource,Math.min(s.anchor,s.focus),Math.max(s.anchor,s.focus),text,[],noteRanges(this.compositionSource).filter(([a])=>this.compositionSource.startsWith('[[',a)?!this.getShowNotes():!this.live()));
+    if(!result)return;
+    this.compositionDraft=result.text;
+    this.onComposition(result.text,result.start,result.end);
+  }
+  endComposition(text){
+    if(!this.composing)return;this.composing=false;
+    const s=this.compositionSelection;this.compositionSelection=null;
+    if(!s)return;
+    if(this.edits.version!==this.compositionVersion){this.keepDraft(text);this.refresh();return;}
+    this.input.value=this.compositionSource;this.selection=s;
+    this.onComposition(this.compositionSource,s.anchor,s.focus);
+    if(text)this.insert(text,'composition',s,this.compositionVersion);
+    else this.refresh();
+  }
   beforeInput(e){
-    if(!this.full()||!this.main.contains(e.target)||this.composing||e.isComposing)return;
+    if(!this.isEditing()||!this.main.contains(e.target)||this.composing||e.isComposing)return;
     e.preventDefault();const type=e.inputType;
     if(type==='historyUndo'||type==='historyRedo'){this.history(type==='historyUndo'?-1:1);return;}
     if(type==='insertParagraph'||type==='insertLineBreak'){this.insert('\n',type);return;}
@@ -212,14 +242,16 @@ export class PreviewEditor{
     if(type.startsWith('insert')&&e.data!==null){const r=type==='insertReplacementText'?e.getTargetRanges?.()[0]:null;let selection;if(r){const a=this.boundary(r.startContainer,r.startOffset),b=this.boundary(r.endContainer,r.endOffset);if(a!==null&&b!==null)selection={anchor:a,focus:b};}this.insert(e.data,type,selection||this.readSelection()||this.selection);return;}
     if(type.startsWith('format'))this.mark({formatBold:'**',formatItalic:'*',formatUnderline:'_'}[type]);
   }
-  history(delta){this.undo(delta);this.selection=this.full()?{anchor:this.input.selectionStart,focus:this.input.selectionEnd}:null;this.refresh();}
+  history(delta){this.undo(delta);this.selection=this.isEditing()?{anchor:this.input.selectionStart,focus:this.input.selectionEnd}:null;this.refresh();}
   mark(marker){
     if(!marker)return;
     const s=this.readSelection()||this.selection;if(!s)return;const a=Math.min(s.anchor,s.focus),b=Math.max(s.anchor,s.focus);
     this.input.setSelectionRange(a,b);this.remember();const result=toggleMarkup(this.input.value,a,b,marker);this.apply(result.text,result.start,result.end,'markup',false);this.selection={anchor:result.start,focus:result.end};this.refresh();
   }
   key(e){
-    if(!this.enabled||this.composing||e.isComposing)return;const key=e.key.toLowerCase(),mod=e.ctrlKey||e.metaKey;
+    if(this.composing||e.isComposing)return;const key=e.key.toLowerCase(),mod=e.ctrlKey||e.metaKey;
+    if(mod&&key==='s'){e.preventDefault();this.save(e.shiftKey);return;}
+    if(!this.enabled)return;
     if(['arrowleft','arrowright','arrowup','arrowdown','home','end'].includes(key))this.lastRestored=null;
     if(this.live()&&this.main.contains(e.target)&&!e.altKey){
       const s=this.readSelection()||this.selection;
@@ -229,17 +261,16 @@ export class PreviewEditor{
         pos=this.skipHidden(pos,backward);this.selection={anchor:e.shiftKey?s.anchor:pos,focus:pos};this.updateLive(false);this.restoreSelection();return;
       }
     }
-    if(mod&&key==='a'&&this.full()&&this.main.contains(e.target)){e.preventDefault();this.selection={anchor:0,focus:this.input.value.length};this.restoreSelection();return;}
-    if(mod&&key==='s'){e.preventDefault();if(this.finish())this.save(e.shiftKey);return;}
+    if(mod&&key==='a'&&this.isEditing()&&this.main.contains(e.target)){e.preventDefault();this.selection={anchor:0,focus:this.input.value.length};this.restoreSelection();return;}
     if(mod&&key==='enter'){e.preventDefault();this.finish();return;}
     if(mod&&['z','y'].includes(key)){e.preventDefault();this.history(key==='y'||e.shiftKey?1:-1);return;}
     if(mod&&['b','i','u'].includes(key)){e.preventDefault();this.mark({b:'**',i:'*',u:'_'}[key]);}
   }
   paste(e){
     if(!this.enabled||this.composing)return;const text=clipboardFountain(e.clipboardData.getData('text/plain'),e.clipboardData.getData('text/html'));
-    if(this.full()){e.preventDefault();this.insert(text,'insertFromPaste');}
+    if(this.isEditing()){e.preventDefault();this.insert(text,'insertFromPaste');}
   }
-  cut(e){if(!this.full())return;const s=this.doc.getSelection();if(s?.isCollapsed)return;e.preventDefault();e.clipboardData.setData('text/plain',s.toString());this.insert('','deleteByCut');}
+  cut(e){if(!this.isEditing())return;const s=this.doc.getSelection();if(s?.isCollapsed)return;e.preventDefault();e.clipboardData.setData('text/plain',s.toString());this.insert('','deleteByCut');}
   keepDraft(text){
     this.notify('원고 위치가 바뀌었습니다. 아래 보관된 입력을 복사해 다시 반영해 주세요.');
     if(!text)return;let field=this.doc.querySelector('#preview-unapplied');if(!field){field=this.doc.createElement('textarea');field.id='preview-unapplied';field.className='preview-raw';field.setAttribute('aria-label','반영하지 못한 입력 보관');this.main.after(field);}field.value+=text;

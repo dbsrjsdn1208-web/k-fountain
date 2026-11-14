@@ -11,6 +11,13 @@ import {plainTextDoc,parseScreenplay,renderPreview,prepareSource,previewCSS,expo
 import {docxBuffer} from '../src/exports.js';
 const from=(s,settings={},names=['민수','영희'])=>parseScreenplay(plainTextDoc(s),names,settings);
 const tokens=s=>parse(s).tokens;
+
+test('incomplete scene spacing and non-title metadata never discard written lines',()=>{
+ assert.equal(tokens('.방  ')[0].text,'.방  ');
+ assert.deepEqual(tokens('.방\n바로 다음 지문').map(t=>t.text),['방','바로 다음 지문']);
+ assert.equal(tokens('첫 문장\nTitle: 문장 안 제목')[0].text,'첫 문장\nTitle: 문장 안 제목');
+ assert.equal(tokens('지문\nAuthor: 사람')[0].text,'지문\nAuthor: 사람');
+});
 const clean=ts=>ts.map(({sourceLine,sourceStart,sourceEnd,sourceMap,sourceId,rawStart,rawEnd,note,...t})=>t);
 const upstream=fs.readFileSync(new URL('../vendor/fountain2html/src/fountain_parser.test.js',import.meta.url),'utf8');
 for(const m of upstream.matchAll(/const (TEXT_\d+) = `([\s\S]*?)`/g)){

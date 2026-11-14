@@ -68,7 +68,7 @@ export function groupElements(elements) {
     if(e.type==='character') {
       const items=[e];i++;
       while(i<elements.length && ['dialogue','parenthetical'].includes(elements[i].type)) items.push(elements[i++]);
-      const prior=groups.at(-1); let before=groups.length-1;
+      let before=groups.length-1;
       while(before>=0 && groups[before].kind==='blank') before--;
       const left=groups[before];
       if(e.dual && left?.kind==='speech') {

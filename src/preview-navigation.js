@@ -1,4 +1,7 @@
 const segmenter=new Intl.Segmenter(undefined,{granularity:'grapheme'});
+const caretMeasurements=new WeakMap();
+const caretStyleProperties=['fontFamily','fontSize','fontWeight','fontStyle','fontVariant','fontStretch','lineHeight','letterSpacing','wordSpacing','textIndent','textTransform','textAlign','direction','tabSize','paddingTop','paddingBottom','paddingLeft','paddingRight','overflowWrap','wordBreak'];
+export function invalidateCaretMeasurement(input){caretMeasurements.delete(input);}
 const contains=(r,x,y)=>r.width>0&&r.height>0&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom;
 
 // Return a visible text boundary only when a real glyph/space was hit. Native
@@ -52,10 +55,13 @@ export class SourceEdits{
 
 // Match the actual textarea's wrapping, including scrollbar width and tabs.
 // Kept outside layout/accessibility and updated only for a navigation click.
-export function revealCaret(input,pos){
-  const doc=input.ownerDocument,css=doc.defaultView.getComputedStyle(input),mirror=doc.createElement('div');
+export function measureCaret(input,pos){
+  const doc=input.ownerDocument,css=doc.defaultView.getComputedStyle(input);
+  const key=JSON.stringify([input.clientWidth,input.wrap,...caretStyleProperties.map(p=>css[p])]),cached=caretMeasurements.get(input);
+  if(cached?.key===key&&cached.text===input.value&&cached.pos===pos)return cached.rect;
+  const mirror=doc.createElement('div');
   mirror.setAttribute('aria-hidden','true');
-  for(const property of ['fontFamily','fontSize','fontWeight','fontStyle','fontVariant','fontStretch','lineHeight','letterSpacing','wordSpacing','textIndent','textTransform','textAlign','direction','tabSize','paddingTop','paddingBottom','paddingLeft','paddingRight','overflowWrap','wordBreak'])mirror.style[property]=css[property];
+  for(const property of caretStyleProperties)mirror.style[property]=css[property];
   Object.assign(mirror.style,{position:'fixed',left:'-100000px',top:'0',visibility:'hidden',pointerEvents:'none',boxSizing:'border-box',width:input.clientWidth+'px',whiteSpace:input.wrap==='off'?'pre':'pre-wrap',overflowWrap:input.wrap==='off'?'normal':'break-word',border:'0',margin:'0'});
   const before=doc.createTextNode(input.value.slice(0,pos)),marker=doc.createElement('span');
   // Keep following text: it controls word wrapping at the insertion point.
@@ -64,11 +70,16 @@ export function revealCaret(input,pos){
   mirror.append(before,marker,doc.createTextNode(input.value.slice(pos+next.length)));doc.body.append(mirror);
   try{
     const base=mirror.getBoundingClientRect(),rect=marker.getBoundingClientRect(),top=rect.top-base.top,bottom=rect.bottom-base.top;
+    const result={top,bottom,left:rect.left-base.left,right:rect.right-base.left,height:rect.height};
+    caretMeasurements.set(input,{key,text:input.value,pos,rect:result});return result;
+  }finally{mirror.remove();}
+}
+export function revealCaret(input,pos){
+    const {top,bottom,left,right}=measureCaret(input,pos);
     const margin=Math.min(24,input.clientHeight/4),viewTop=input.scrollTop,viewBottom=viewTop+input.clientHeight;
     if(top<viewTop)input.scrollTop=Math.max(0,top-margin);
     else if(bottom>viewBottom)input.scrollTop=Math.max(0,bottom-input.clientHeight+margin);
-    if(input.wrap==='off'){const left=rect.left-base.left,right=rect.right-base.left;if(left<input.scrollLeft+margin)input.scrollLeft=Math.max(0,left-margin);else if(right>input.scrollLeft+input.clientWidth-margin)input.scrollLeft=right-input.clientWidth+margin;}
-  }finally{mirror.remove();}
+    if(input.wrap==='off'){if(left<input.scrollLeft+margin)input.scrollLeft=Math.max(0,left-margin);else if(right>input.scrollLeft+input.clientWidth-margin)input.scrollLeft=right-input.clientWidth+margin;}
 }
 
 export function installPreviewNavigation({doc,input,getSnapshot,edits,onNavigate,isComposing=()=>false}){

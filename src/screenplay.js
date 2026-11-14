@@ -6,7 +6,6 @@ import themes from './engine/themes.js';
 import {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,mergeRuns,sliceRuns,groupElements} from './rich-text.js';
 export {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,groupElements};
 export const DEFAULT_SETTINGS={font:'Noto Serif KR',size:12,numbering:'n',txtNumbering:'S#n.',numberMode:'output',follow:true,hashScenes:false,sNumberScenes:false,numericScenes:false,autoNumbers:true,autoCharacters:true,boldCharacters:true,hideOutline:false,theme:'default',previewEditMode:'source',showNotes:false};
-export const FONT_OPTIONS=[]; // Kept only for compatibility with pre-v2 saved work.
 export function plainTextDoc(text){return {type:'doc',content:text.replace(/\r\n?/g,'\n').split('\n').map(text=>({type:'paragraph',content:text?[{type:'text',text}]:[]}))};}
 function escaped(s){return s.replace(/([\\*_])/g,'\\$1');}
 export function fountainRuns(runs){return runs.map(r=>{
@@ -27,7 +26,6 @@ export function htmlRuns(html){
   }
   return mergeRuns(runs);
 }
-export function inlineRuns(runs){return htmlRuns(inlineTagsToHtml(escapeHTML(runs.map(r=>r.text).join(''))));}
 export function prepareSource(doc,names,settings){
   const cfg={...DEFAULT_SETTINGS,...settings};
   const plain=typeof doc==='string';
@@ -37,8 +35,12 @@ export function prepareSource(doc,names,settings){
     let text=fountainRuns(line.runs);
     const raw=line.text;
     const wasComment=inBoneyard||inNote;
-    if(raw.includes('/*'))inBoneyard=true;if(raw.includes('*/'))inBoneyard=false;
-    if(raw.includes('[['))inNote=true;if(raw.includes(']]'))inNote=false;
+    for(const marker of raw.matchAll(/\/\*|\*\/|\[\[|\]\]/g)){
+      if(inBoneyard){if(marker[0]==='*/')inBoneyard=false;}
+      else if(inNote){if(marker[0]===']]')inNote=false;}
+      else if(marker[0]==='/*')inBoneyard=true;
+      else if(marker[0]==='[[')inNote=true;
+    }
     if(wasComment||inBoneyard||inNote||raw.includes('/*')||raw.includes('[['))return text;
     if(!bodyStarted&&!inTitle&&/^(?:title|credit|author[s]?|source|notes|draft date|date|contact|copyright):/i.test(raw.trim()))inTitle=true;
     if(inTitle){if(!raw.trim()){inTitle=false;bodyStarted=true;}return text;}

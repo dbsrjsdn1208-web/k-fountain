@@ -46,8 +46,9 @@ export function projectBlock(block,source,selection,notes,{live=true,showNotes=f
 }
 
 export function paintBlock(doc,block,runs){
-  const signature=JSON.stringify(runs);if(block.signature===signature)return false;
+  const signature=JSON.stringify(runs.map(({text,classes})=>[text,classes]));block.runs=runs;
+  if(block.signature===signature)return false;
   const fragment=doc.createDocumentFragment();
   for(const run of runs){const span=doc.createElement('span');if(run.classes)span.className=run.classes;if(run.classes==='preview-number')span.contentEditable='false';span.textContent=run.text;fragment.append(span);}
-  block.el.replaceChildren(fragment);block.signature=signature;block.runs=runs;return true;
+  block.el.replaceChildren(fragment);block.signature=signature;return true;
 }

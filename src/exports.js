@@ -32,7 +32,3 @@ export function makeDocx(elements, title, settings) {
 }
 export async function docxBlob(elements,title,settings) {return Packer.toBlob(makeDocx(elements,title,settings));}
 export async function docxBuffer(elements,title,settings) {return Packer.toBuffer(makeDocx(elements,title,settings));}
-export function download(data,name,type='text/plain;charset=utf-8') {
-  const blob=data instanceof Blob?data:new Blob([data],{type});
-  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
-}

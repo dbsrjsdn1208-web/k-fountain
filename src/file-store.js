@@ -20,14 +20,3 @@ export class FileSession {
     }finally{this.busy=false;}
   }
 }
-export function handleDB(action,value){
-  return new Promise((resolve,reject)=>{
-    const request=indexedDB.open('k-fountain-files',1);
-    request.onupgradeneeded=()=>request.result.createObjectStore('handles');
-    request.onerror=()=>reject(request.error);
-    request.onsuccess=()=>{const db=request.result,tx=db.transaction('handles',action==='get'?'readonly':'readwrite'),s=tx.objectStore('handles');
-      const op=action==='get'?s.get('current'):action==='delete'?s.delete('current'):s.put(value,'current');
-      tx.oncomplete=()=>{db.close();resolve(op.result);};tx.onerror=()=>{db.close();reject(tx.error);};
-    };
-  });
-}

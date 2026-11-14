@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {parse} from '../src/engine/fountain_parser.js';
 import {parseScreenplay,renderPreview} from '../src/screenplay.js';
-import {SourceEdits,mappedPosition,hitText,revealCaret,installPreviewNavigation} from '../src/preview-navigation.js';
+import {SourceEdits,mappedPosition,hitText,revealCaret,installPreviewNavigation,invalidateCaretMeasurement} from '../src/preview-navigation.js';
+import {previewPoint} from '../src/peer-carets.js';
 
 function preview(source,names=[]){const elements=parseScreenplay(source,names);const dom=new JSDOM(renderPreview(elements));return {elements,dom,doc:dom.window.document};}
 function verifyMap(source,names=[]){
@@ -57,8 +58,16 @@ test('caret mirror keeps visible positions still, reveals outside positions, and
   let top=105,mirror;
   w.HTMLElement.prototype.getBoundingClientRect=function(){if(this.tagName==='SPAN'){mirror=this.parentNode;return {top,bottom:top+20,left:0,right:10};}return {top:0,left:0};};
   revealCaret(input,5);assert.equal(input.scrollTop,100);assert.equal(mirror.style.width,'240px');assert.equal(mirror.style.fontFamily,'monospace');assert.equal(mirror.style.whiteSpace,'pre-wrap');assert.equal(mirror.querySelector('span').textContent,'😊');assert.equal(mirror.isConnected,false);
-  top=480;revealCaret(input,5);assert.equal(input.scrollTop,324);
-  top=20;revealCaret(input,5);assert.equal(input.scrollTop,0);dom.window.close();
+  top=480;invalidateCaretMeasurement(input);revealCaret(input,5);assert.equal(input.scrollTop,324);
+  top=20;invalidateCaretMeasurement(input);revealCaret(input,5);assert.equal(input.scrollTop,0);dom.window.close();
+});
+
+test('passive preview caret uses exact source ranges without changing text or selection',()=>{
+  const source='.방 #88#\n\n@민서\n반복\n(작게)\n반복',p=preview(source),before=p.doc.body.innerHTML;
+  const point=previewPoint(p.doc,p.elements.navigation,source.lastIndexOf('반복')+1);
+  assert.equal(point.node.data,'반복');assert.equal(point.offset,1);assert.equal(point.node.parentElement.dataset.source,'5');
+  const scene=previewPoint(p.doc,p.elements.navigation,1);assert.equal(scene.node.data.slice(scene.offset),'방');
+  assert.equal(p.doc.body.innerHTML,before);assert.equal(p.doc.getSelection().rangeCount,0);p.dom.window.close();
 });
 
 // Geometry test doubles exercise gesture and glyph boundaries; real wrapping

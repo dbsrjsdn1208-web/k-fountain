@@ -50,8 +50,6 @@ const RE = {
   // Sorted alphabetically.
   BONEYARD: /\/\*.*?\*\//gms,
   CENTERED: /^(?:> *)(.+)(?: *<)(\n.+)*/g,
-  DIALOGUE: /^(@[^\^\n]+|(?=[^\n]*[A-Z])[A-Z0-9*_ .\-'’]+(?:\([^\n]*\))?\s*)(\^?)?(?:\n(?!\n+))([\s\S]+)/,
-  EXTRA_LINE_BREAKS: /^\n+|\n+$/,
   EXTRA_WHITESPACES: /^\t+|^ {3,}/gm,
   LINE_BREAKS: /\r\n|\r/g,
   NOTE: /^(?:\[{2}(?!\[+))(.+)?(?:\]{2})(?!\[+)$/s,
@@ -97,7 +95,7 @@ function parse(fountainText, options = {}) {
     blockStart=raw.map[0]?.[0]??0;
     let found;
     RE.TITLE_PAGE.lastIndex=0;
-    if(i===firstBlock&&RE.TITLE_PAGE.test(block.text)){
+    if(i===firstBlock&&RE.TITLE_PAGE.exec(block.text)?.index===0){
       const fields=[...block.text.matchAll(new RegExp(RE.TITLE_PAGE.source,'gim'))];
       for(let j=fields.length-1;j>=0;j--){
         const field=slice(block,fields[j].index,fields[j+1]?.index??block.text.length);
@@ -109,11 +107,12 @@ function parse(fountainText, options = {}) {
     if(block.text.startsWith('~')){push(TokenType.LYRIC,remove(block,/^~/gm));continue;}
     if((found=match(block,RE.SCENE_HEADING))){
       let value=found.m[1]!==undefined?found.c(1):found.c(2);
-      if(!value.text.endsWith('  ')){
-        const number=match(value,RE.SCENE_NUMBER),sceneNumber=number?.m[2]??null;
-        if(number)value=remove(value,RE.SCENE_NUMBER);
-        push(TokenType.SCENE_HEADING,value,{sceneNumber});
-      }continue;
+      if(value.text.endsWith('  ')){push(TokenType.ACTION,raw);continue;}
+      const nextLine=raw.text.indexOf('\n');
+      if(nextLine>=0)push(TokenType.ACTION,slice(raw,nextLine+1));
+      const number=match(value,RE.SCENE_NUMBER),sceneNumber=number?.m[2]??null;
+      if(number)value=remove(value,RE.SCENE_NUMBER);
+      push(TokenType.SCENE_HEADING,value,{sceneNumber});continue;
     }
     if((found=match(block,RE.CENTERED))){push(TokenType.CENTERED,remove(found.c(0),/^>|<$/gm));continue;}
     if((found=match(block,RE.TRANSITION))){push(TokenType.TRANSITION,found.m[1]!==undefined?found.c(1):found.c(2));continue;}

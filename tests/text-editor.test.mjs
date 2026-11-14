@@ -101,3 +101,6 @@ test('previous disk content is backed up before writing and backup failure stops
  session.beforeWrite=async entry=>{saved=entry;assert.equal(h.writes,0);};await session.save('수정','old.fountain');assert.equal(saved.text,'복구할 원본');assert.equal(h.data,'수정');
  session.beforeWrite=async()=>{throw Error('backup failed');};await assert.rejects(session.save('덮어쓰기','old.fountain'),/backup failed/);assert.equal(h.data,'수정');
 });
+test('automatic character normalization respects sequentially reopened notes and comments',()=>{
+ for(const text of ['[[닫음]] [[열림\n\n민서\n내용\n]]','/* 닫음 */ /* 열림\n\n민서\n내용\n*/'])assert.equal(normalizeText(text,['민서'],{}),text);
+});

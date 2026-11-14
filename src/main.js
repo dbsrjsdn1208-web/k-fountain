@@ -3,11 +3,13 @@ import '@fontsource/noto-serif-kr/700.css';
 import './style.css';
 import {DEFAULT_SETTINGS,escapeHTML as esc,parseScreenplay,renderPreview,previewCSS,exportReadableText} from './screenplay.js';
 import {cleanNames,normalizeText,normalizeNewlines,mapSelection,toggleMarkup,clipboardFountain,migrateLegacy} from './text-tools.js';
-import {FileSession,handleDB} from './file-store.js';
+import {FileSession} from './file-store.js';
 import {SourceEdits,installPreviewNavigation,revealCaret} from './preview-navigation.js';
 import {PreviewEditor,editorCSS} from './preview-editor.js';
 import {installViewControls} from './view-controls.js';
 import {printDocument} from './print-document.js';
+import {updatePreviewDOM} from './preview-dom.js';
+import {installPeerCarets} from './peer-carets.js';
 
 const STORAGE='k-fountain.document.v2',LEGACY='jangmyeon.document.v1';
 const SAMPLE='.기차역, 플랫폼 / 새벽\n\n첫 기차의 안내 방송이 흐른다.\n\n@민서 (작게)\n이번에는 **정말** 가는 거야.\n\n@도윤\n돌아와도 돼.\n\n.기차 안 / 아침\n\n_돌아오는 길은 언제나 여기 있을 테니까._';
@@ -27,9 +29,9 @@ let state={version:2,text:SAMPLE,title:'제목 없는 시나리오',names:['민�
 let recovered=false,recoveryProblem=false;
 try{const saved=localStorage.getItem(STORAGE)||localStorage.getItem(LEGACY);if(saved){state=validate(JSON.parse(saved));recovered=true;}}catch{recoveryProblem=true;}
 const $=s=>document.querySelector(s),files=new FileSession();
-let elements,framePending=0,composing=false,dirty=false,previewText=null,previewKey='',toastTimer,recoveryTimer,revision=0;
+let elements,composing=false,dirty=false,previewText=null,previewKey='',toastTimer,recoveryTimer;
 let history=[],historyIndex=-1,lastEditTime=0,lastEditType='',installPrompt;
-let previewEditor,viewControls,lastPane='source',lastPreviewSelection=null,followFrame=0;
+let previewEditor,viewControls,peerCarets,lastPane='source',lastPreviewSelection=null,followFrame=0;
 document.querySelector('#app').innerHTML=`
 <header id="header-panel"><div class="title">K-파운틴</div><p>Fountain으로 쓰고, 대본으로 미리 봅니다.<br><span>Ctrl+B 굵게 · Ctrl+I 기울임 · Ctrl+U 밑줄</span></p><button id="install" hidden>앱 설치</button></header>
 <div id="top-panel"><div class="file-tools"><button id="new">새 문서</button><button id="open">열기</button><input id="title" aria-label="파일 이름" value="${esc(state.title)}"><button id="save" title="Ctrl+S">저장</button><button id="save-as" title="Ctrl+Shift+S">다른 이름으로 저장</button></div><div class="output-tools"><button id="preview-edit" aria-pressed="false">미리보기 편집</button><button id="pdf">PDF / 인쇄</button><button id="docx">DOCX</button><button id="txt">TXT</button><div class="view-tools"><button id="view" aria-expanded="false" aria-controls="view-menu">보기</button><div id="view-menu" hidden><label><input id="view-source" type="checkbox"> 원본 화면</label><label><input id="view-preview" type="checkbox"> 미리보기 화면</label><label for="source-size">원본 글자 크기 <input id="source-size" type="number" min="10" max="40" step="1"> px</label><small>원본 위에서 Ctrl+휠로 조절</small><button id="view-reset">화면 배치 초기화</button></div></div><button id="settings">설정</button></div></div>
@@ -76,11 +78,10 @@ function normalize(deferCue=false){
   if(deferCue){const line=previous.slice(0,input.selectionStart).split('\n').length-1,a=previous.split('\n'),b=next.split('\n');if(!a[line]?.trimStart().startsWith('@')&&b[line]?.trimStart().startsWith('@')){b[line]=b[line].replace('@','');next=b.join('\n');}}
   if(next!==previous){const [start,end]=mapSelection(previous,next,input.selectionStart,input.selectionEnd),scroll=input.scrollTop;input.value=next;input.setSelectionRange(start,end);input.scrollTop=scroll;}
 }
-function changed(){sourceEdits.record(input.value);state.text=input.value;revision++;dirty=files.lastSaved!==input.value;updateStatus();queueRender();queueRecovery();}
+function changed(render=true){sourceEdits.record(input.value);state.text=input.value;dirty=files.lastSaved!==input.value;updateStatus();if(render)renderNow();queueRecovery();}
 function updateStatus(){const name=files.handle?.name||state.title+'.fountain';$('#file-status').textContent=files.handle?`${name} · ${dirty?'변경됨':'파일에 저장됨'}`:files.lastSaved!==null?`${name} · ${dirty?'변경됨':'다운로드됨'}`:'파일 저장 위치 미지정';}
 function queueRecovery(){clearTimeout(recoveryTimer);recoveryTimer=setTimeout(saveRecovery,350);}
 function saveRecovery(){try{state.text=input.value;localStorage.setItem(STORAGE,JSON.stringify(state));$('#recovery-status').textContent='임시 복구본 보관됨';return true;}catch{$('#recovery-status').textContent='임시 복구본 저장 실패';return false;}}
-function queueRender(){if(!framePending)framePending=requestAnimationFrame(()=>{framePending=0;renderNow();});}
 const previewDoc=frame.contentDocument;
 previewDoc.open();previewDoc.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>K-파운틴</title><style id="fonts"></style><style id="style"></style></head><body><main></main></body></html>');previewDoc.close();
 const faces=[...document.styleSheets].flatMap(s=>{try{return [...s.cssRules].filter(r=>r.type===5).map(r=>r.cssText);}catch{return [];}}).join('\n');
@@ -91,11 +92,11 @@ function renderNow(){
   if(input.value!==previewText||key!==previewKey){
     elements=parseScreenplay(input.value,state.names,state.settings);
     const scroll=frame.contentWindow.scrollY,html=renderPreview(elements,{showNotes:state.settings.showNotes}),main=previewDoc.querySelector('main');
-    if(main.innerHTML!==html)main.innerHTML=html;
+    const originals=updatePreviewDOM(main,html,previewEditor?.enabled);
     navigationSnapshot={records:elements.navigation,version:sourceEdits.version};
     if(key!==previewKey){previewDoc.querySelector('#style').textContent=previewCSS(state.settings)+editorCSS;input.style.fontFamily=`${JSON.stringify(state.settings.font)},"Noto Serif KR",serif`;}
-    frame.contentWindow.scrollTo(0,scroll);previewEditor?.decorate();previewText=input.value;previewKey=key;
-  }followCaret();
+    frame.contentWindow.scrollTo(0,scroll);previewEditor?.decorate(originals);previewText=input.value;previewKey=key;
+  }followCaret();peerCarets?.update();
 }
 function followCaret(){
   if(!elements||composing||suppressFollow||!state.settings.follow||frame.parentElement.hidden||document.activeElement!==input)return;
@@ -122,11 +123,12 @@ function previewSelection(selection,version){
   if(anchor===null||focus===null)return;
   lastPreviewSelection={anchor,focus,version:sourceEdits.version};lastPane='preview';
   input.setSelectionRange(Math.min(anchor,focus),Math.max(anchor,focus),focus<anchor?'backward':'forward');
+  peerCarets?.update();
   if(followFrame)return;
   followFrame=requestAnimationFrame(()=>{
     followFrame=0;if(lastPane!=='preview'||previewEditor.busy()||!state.settings.follow||input.hidden)return;
     const pos=sourceEdits.map(lastPreviewSelection.focus,lastPreviewSelection.version);if(pos===null)return;
-    suppressFollow=true;revealCaret(input,pos);
+    suppressFollow=true;revealCaret(input,pos);peerCarets?.update();
   });
 }
 function restoreWorkFocus(){
@@ -149,10 +151,15 @@ function layoutChanged(){
       else if(lastPane==='source'){revealCaret(input,input.selectionEnd);followCaret();}
     }
     if(!frame.parentElement.hidden&&lastPane==='preview'&&previewEditor.enabled)previewEditor.revealCaret();
+    peerCarets?.update();
   });
 }
 previewEditor=new PreviewEditor({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,getMode:()=>state.settings.previewEditMode||'source',getShowNotes:()=>state.settings.showNotes===true,onSelection:previewSelection,
-  apply:(text,start,end,type,auto)=>{suppressFollow=true;input.value=text;input.setSelectionRange(start,end);if(auto)normalize(true);record(type);changed();},
+  apply:(text,start,end,type,auto)=>{suppressFollow=true;input.value=text;input.setSelectionRange(start,end);if(auto)normalize(true);record(type);changed(false);},
+  onComposition:(text,start,end)=>{
+    input.value=text;input.setSelectionRange(Math.min(start,end),Math.max(start,end));state.text=text;
+    dirty=files.lastSaved!==text;lastPane='preview';updateStatus();queueRecovery();peerCarets?.update();
+  },
   remember:()=>{if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();},undo:restoreHistory,
   refresh:()=>{previewText=null;renderNow();},notify:toast,save:saveFile});
 $('#preview-edit').onclick=()=>{if(previewEditor.toggle(!previewEditor.enabled))$('#preview-edit').setAttribute('aria-pressed',String(previewEditor.enabled));};
@@ -178,7 +185,8 @@ input.addEventListener('keydown',event=>{
   if((event.ctrlKey||event.metaKey)&&['b','i','u'].includes(key)){event.preventDefault();history[historyIndex]=snapshot();const edit=toggleMarkup(input.value,input.selectionStart,input.selectionEnd,{b:'**',i:'*',u:'_'}[key]);applyText(edit.text,edit.start,edit.end);return;}
   if((event.ctrlKey||event.metaKey)&&(key==='z'||key==='y')){event.preventDefault();restoreHistory(key==='y'||event.shiftKey?1:-1);}
 });
-input.addEventListener('keyup',followCaret);input.addEventListener('click',()=>{suppressFollow=false;followCaret();});input.addEventListener('select',followCaret);
+const sourceCaretChanged=()=>{followCaret();peerCarets?.update();};
+input.addEventListener('keyup',sourceCaretChanged);input.addEventListener('click',()=>{suppressFollow=false;sourceCaretChanged();});input.addEventListener('select',sourceCaretChanged);
 document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'&&!composing){event.preventDefault();saveFile(event.shiftKey);}});
 function filename(){return (state.title.trim()||'제목 없는 시나리오').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\.fountain$/i,'');}
 function download(data,name,type='text/plain;charset=utf-8'){const blob=data instanceof Blob?data:new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
@@ -186,9 +194,9 @@ async function saveFile(as=false){
   if(files.busy){toast('저장이 진행 중입니다. 완료 후 다시 시도해 주세요.');return false;}
   if(!previewEditor.finish())return false;
   if(composing){toast('한글 입력을 마친 뒤 저장해 주세요.');return false;}
-  normalize();record('normalize');changed();const text=input.value;
+  normalize();record('normalize');changed();const text=input.value,titleAtSave=state.title;
   try{
-    if(files.supported){await files.save(text,filename()+'.fountain',as||!!files.handle&&state.title!==files.handle.name.replace(/\.fountain$/i,''));state.title=files.handle.name.replace(/\.fountain$/i,'');$('#title').value=state.title;handleDB('put',files.handle).catch(()=>{});}
+    if(files.supported){await files.save(text,filename()+'.fountain',as||!!files.handle&&state.title!==files.handle.name.replace(/\.fountain$/i,''));if(state.title===titleAtSave){state.title=files.handle.name.replace(/\.fountain$/i,'');$('#title').value=state.title;}}
     else{download(text,filename()+'.fountain');files.lastSaved=text;toast('다운로드했습니다. 같은 파일 덮어쓰기는 Chrome·Edge에서 지원됩니다.');}
     dirty=input.value!==files.lastSaved;updateStatus();saveRecovery();return true;
   }catch(error){if(error.name!=='AbortError')toast('저장하지 못했습니다. '+error.message);return false;}
@@ -199,10 +207,13 @@ async function confirmReplace(){
   if(!dirty&&files.lastSaved!==null)return true;
   const dialog=$('#replace-dialog');dialog.returnValue='cancel';dialog.showModal();
   const decision=await new Promise(resolve=>dialog.addEventListener('close',()=>resolve(dialog.returnValue),{once:true}));
-  return decision==='discard'||decision==='save'&&await saveFile();
+  if(decision==='discard')return true;
+  if(decision!=='save'||!await saveFile())return false;
+  if(input.value!==files.lastSaved){toast('저장 중 추가한 내용이 있어 현재 문서를 유지합니다. 다시 저장해 주세요.');return false;}
+  return true;
 }
 document.querySelectorAll('[data-decision]').forEach(b=>b.onclick=()=>$('#replace-dialog').close(b.dataset.decision));
-function setDocument(next,handle=null,saved=null){if(files.busy)throw Error('저장이 진행 중입니다. 완료 후 문서를 바꿔 주세요.');const validated=validate(next);if(input.value)preserveRecovery({title:state.title,text:input.value});state=validated;input.value=state.text;sourceEdits.reset(input.value);lastPreviewSelection=null;navigationSnapshot=null;suppressFollow=false;files.handle=handle;files.lastSaved=saved;dirty=saved!==input.value;$('#title').value=state.title;resetHistory();previewText=null;syncSettings();changed();input.scrollTop=0;frame.contentWindow.scrollTo(0,0);if(handle)handleDB('put',handle).catch(()=>{});else handleDB('delete').catch(()=>{});}
+function setDocument(next,handle=null,saved=null){if(files.busy)throw Error('저장이 진행 중입니다. 완료 후 문서를 바꿔 주세요.');const validated=validate(next);if(input.value)preserveRecovery({title:state.title,text:input.value});state=validated;input.value=state.text;sourceEdits.reset(input.value);lastPreviewSelection=null;navigationSnapshot=null;suppressFollow=false;files.handle=handle;files.lastSaved=saved;dirty=saved!==input.value;$('#title').value=state.title;resetHistory();previewText=null;syncSettings();changed();input.scrollTop=0;frame.contentWindow.scrollTo(0,0);}
 async function load(file,text,handle=null){
   if(file.size>10*1024*1024)throw Error('10MB 이하의 파일을 선택해 주세요.');
   const next=/\.json$/i.test(file.name)?validate(JSON.parse(text)):{...state,text:normalizeNewlines(text),title:file.name.replace(/\.[^.]+$/,'')};
@@ -241,10 +252,11 @@ async function saveExport(blob,extension){
 $('#pdf').onclick=async()=>{if(!previewEditor.finish())return;await printDocument({doc:document,text:input.value,names:state.names,settings:state.settings,title:state.title,fonts:faces,restoreFocus:restoreWorkFocus});};
 $('#docx').onclick=async()=>{
   if(!previewEditor.finish())return;
+  const output={text:input.value,names:[...state.names],title:state.title,settings:{...state.settings},name:filename()};
   // Open the picker within the user gesture, before loading the export library.
-  try{const handle=window.showSaveFilePicker?await window.showSaveFilePicker({suggestedName:filename()+'.docx',id:'k-fountain-export',types:[{description:'Word 문서',accept:{'application/vnd.openxmlformats-officedocument.wordprocessingml.document':['.docx']}}]}):null;
-    renderNow();const {docxBlob}=await import('./exports.js'),blob=await docxBlob(elements,state.title,state.settings);
-    if(handle){const writable=await handle.createWritable();try{await writable.write(blob);await writable.close();}catch(e){try{await writable.abort();}catch{}throw e;}}else download(blob,filename()+'.docx');toast('DOCX를 저장했습니다.');
+  try{const handle=window.showSaveFilePicker?await window.showSaveFilePicker({suggestedName:output.name+'.docx',id:'k-fountain-export',types:[{description:'Word 문서',accept:{'application/vnd.openxmlformats-officedocument.wordprocessingml.document':['.docx']}}]}):null;
+    const {docxBlob}=await import('./exports.js'),blob=await docxBlob(parseScreenplay(output.text,output.names,output.settings),output.title,output.settings);
+    if(handle){const writable=await handle.createWritable();try{await writable.write(blob);await writable.close();}catch(e){try{await writable.abort();}catch{}throw e;}}else download(blob,output.name+'.docx');toast('DOCX를 저장했습니다.');
   }catch(e){if(e.name!=='AbortError')toast('DOCX 저장 실패: '+e.message);}
 };
 $('#txt').onclick=()=>{$('#txt-numbering').value=state.settings.txtNumbering;$('#txt-dialog').showModal();};
@@ -264,6 +276,7 @@ window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.return
 viewControls=installViewControls({doc:document,input,frame,isBusy:()=>composing||previewEditor.busy(),onLayout:layoutChanged,restoreFocus:restoreWorkFocus});
 for(const doc of [document,previewDoc])doc.addEventListener('compositionend',()=>queueMicrotask(()=>viewControls.flush()));
 previewDoc.addEventListener('pointerdown',()=>viewControls.close());
+peerCarets=installPeerCarets({input,frame,getSnapshot:()=>navigationSnapshot,getEditor:()=>previewEditor});
 resetHistory();syncSettings();renderNow();
 if(recoveryProblem)toast('기존 복구본을 읽지 못했습니다. 기존 데이터는 보존되어 있습니다.');else saveRecovery();
 // Recovered text must never silently reconnect to a separately persisted file handle.
