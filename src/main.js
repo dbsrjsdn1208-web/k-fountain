@@ -18,6 +18,7 @@ function validate(value){
   settings.font=String(settings.font||DEFAULT_SETTINGS.font).slice(0,150);
   settings.size=[10,11,12,13,14].includes(+settings.size)?+settings.size:12;
   settings.numberMode=settings.numberMode==='source'?'source':'output';
+  settings.continuationLanguage=settings.continuationLanguage==='ko'?'ko':'en';
   settings.previewEditMode=settings.previewEditMode==='full'?'full':'source';
   if(!['default','cjk','dark','ocean','colorful'].includes(settings.theme))settings.theme='default';
   if(!['S#n.','S#n','n.','n'].includes(settings.txtNumbering))settings.txtNumbering='S#n.';
@@ -43,6 +44,7 @@ document.querySelector('#app').innerHTML=`
 <label>장면 번호 자동<select id="number-mode"><option value="output">출력만 갱신 — 원고 유지</option><option value="source">원고에도 반영 — #1#, #2#</option><option value="off">끄기 — 직접 쓴 번호 유지</option></select></label><p class="hint">장면은 .장소 또는 INT. / EXT.로 시작합니다. #는 Fountain의 섹션 기호입니다. 원고 반영을 끄더라도 이미 쓴 번호는 지워지지 않습니다.</p>
 <label class="check"><input id="auto-characters" type="checkbox">등록된 인물명에 @ 자동 추가</label><label>등록 인물<textarea id="names" rows="5" placeholder="한 줄에 한 명씩&#10;민서&#10;(인물)"></textarea></label><p class="hint">민서 (전화), (민서), (인물), 동시 대사 ^를 지원합니다. 지문과 대사 중 지시문은 그대로 둡니다.</p>
 <label class="check"><input id="bold-characters" type="checkbox">인물명 굵게 출력</label><label class="check"><input id="show-notes" type="checkbox">미리보기에 [[메모]] 표시</label><p class="hint">인쇄·PDF·DOCX·읽기용 TXT에는 항상 제외합니다. 숨긴 메모는 원본에서 수정하세요.</p><label class="check"><input id="follow" type="checkbox">양쪽 화면이 작성 위치 따라가기</label><label class="check"><input id="hide-outline" type="checkbox">출력에서 섹션·시놉시스 숨기기</label>
+<label>PDF 대사 계속 표기<select id="continuation-language"><option value="en">영문 (MORE) / (CONT'D)</option><option value="ko">한글 (계속) / (이어서)</option></select></label><p class="hint">페이지를 넘겨 이어지는 대사에 자동으로 넣습니다.</p>
 <details><summary>사용 방법</summary><p>.장소 / 시간 → 장면<br>@인물 (전화) → 인물명<br>(작게) → 대사 지시문<br>두 번째 인물명 뒤 ^ → 동시 대사<br>=== → 페이지 나누기<br>**굵게** · *기울임* · _밑줄_<br>Ctrl+S → 같은 파일에 저장<br>Ctrl+Shift+S → 다른 이름으로 저장</p><p>구글 독스에서 붙여넣은 강조는 Fountain 기호로 바뀝니다. PDF는 인쇄 창에서 PDF 저장을 선택하세요. DOCX는 구글 독스에서 열어 편집할 수 있습니다.</p><p id="save-support"></p></details></dialog>
 <dialog id="txt-dialog"><div class="dialog-heading"><h2>TXT 내보내기</h2><button data-close="txt-dialog">닫기</button></div><label>장면 번호 표시<select id="txt-numbering"><option value="S#n.">S#1. 장소</option><option value="S#n">S#1 장소</option><option value="n.">1. 장소</option><option value="n">1 장소</option></select></label><p class="hint">Fountain 기호를 뺀 읽기용 대본입니다. 원본 파일은 변경하지 않습니다.</p><button id="export-txt">TXT 저장</button></dialog>
 <dialog id="replace-dialog"><h2>현재 원고를 닫을까요?</h2><p>파일에 저장하지 않은 변경 내용이 있습니다.</p><div class="dialog-actions"><button data-decision="cancel">취소</button><button data-decision="discard">저장하지 않고 계속</button><button data-decision="save">저장 후 계속</button></div></dialog>`;
@@ -217,6 +219,7 @@ $('#save').onclick=()=>saveFile();$('#save-as').onclick=()=>saveFile(true);
 $('#title').oninput=e=>{state.title=e.target.value;updateStatus();queueRecovery();};
 function syncSettings(){
   $('#preview-edit-mode').value=state.settings.previewEditMode||'source';
+  $('#continuation-language').value=state.settings.continuationLanguage||'en';
   $('#font').value=state.settings.font;$('#size').value=state.settings.size;$('#theme').value=state.settings.theme;
   $('#number-mode').value=state.settings.autoNumbers?state.settings.numberMode:'off';$('#txt-numbering').value=state.settings.txtNumbering;$('#names').value=state.names.join('\n');
   for(const [id,key]of Object.entries({'auto-characters':'autoCharacters','bold-characters':'boldCharacters',follow:'follow','hide-outline':'hideOutline','show-notes':'showNotes'}))$('#'+id).checked=state.settings[key];
@@ -228,6 +231,7 @@ document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$('#'+b.datas
 $('#settings-dialog').addEventListener('close',restoreWorkFocus);
 $('#font').oninput=e=>{state.settings.font=e.target.value.trim()||DEFAULT_SETTINGS.font;settingChanged();};
 $('#size').onchange=e=>{state.settings.size=+e.target.value;settingChanged();};
+$('#continuation-language').onchange=e=>{state.settings.continuationLanguage=e.target.value;queueRecovery();};
 $('#theme').onchange=e=>{state.settings.theme=e.target.value;settingChanged();};
 $('#number-mode').onchange=e=>{state.settings.autoNumbers=e.target.value!=='off';state.settings.numberMode=e.target.value==='source'?'source':'output';settingChanged(true);};
 $('#names').oninput=e=>{state.names=cleanNames(e.target.value);settingChanged();};
@@ -238,7 +242,7 @@ async function saveExport(blob,extension){
   if(window.showSaveFilePicker){const handle=await window.showSaveFilePicker({suggestedName:filename()+'.'+extension,id:'k-fountain-export',types:[{description:extension.toUpperCase(),accept:{'text/plain':['.txt']}}]});const writable=await handle.createWritable();try{await writable.write(blob);await writable.close();}catch(e){try{await writable.abort();}catch{}throw e;}}
   else download(blob,filename()+'.'+extension);
 }
-$('#pdf').onclick=async()=>{if(!previewEditor.finish())return;await printDocument({doc:document,text:input.value,names:state.names,settings:state.settings,title:state.title,fonts:faces,restoreFocus:restoreWorkFocus});};
+$('#pdf').onclick=async()=>{if(!previewEditor.finish())return;try{await printDocument({doc:document,text:input.value,names:state.names,settings:state.settings,title:state.title,fonts:faces,restoreFocus:restoreWorkFocus});}catch(error){toast('인쇄 준비 실패: '+error.message);}};
 $('#docx').onclick=async()=>{
   if(!previewEditor.finish())return;
   // Open the picker within the user gesture, before loading the export library.

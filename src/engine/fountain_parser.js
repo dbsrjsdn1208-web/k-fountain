@@ -57,7 +57,7 @@ const RE = {
   NOTE: /^(?:\[{2}(?!\[+))(.+)?(?:\]{2})(?!\[+)$/s,
   PAGE_BREAK: /^={3,}$/,
   PARENTHETICAL: /^(\(.+\))$/,
-  PARENTHETICAL_SPLITTER: /^(\([^\n]*\))[ \t]*(?:\n+|$)/gm,
+  PARENTHETICAL_SPLITTER: /^([ \t]*\([^\n]*\))[ \t]*(?:\n+|$)/gm,
   SCENE_HEADING: /^((?:\*{0,3}_?)?(?:(?:int\.?\/ext|int|ext|est|i\/e)[. ]).+)|^(?:\.(?!\.+))(.+)/i,
   SCENE_NUMBER: /( *#(.+)# *)/,
   SECTION: /^(#+)(?: *)(.*)/,
@@ -124,13 +124,13 @@ function parse(fountainText, options = {}) {
       if(character.text.endsWith('  ')){push(TokenType.ACTION,remove(raw,/\s+$/));continue;}
       if(hasCaret)push(TokenType.DUAL_DIALOGUE_END);
       push(TokenType.DIALOGUE_END);
-      const body=slice(block,newline+1),parts=[];let cursor=0;
+      const body=slice(raw,raw.text.indexOf('\n')+1),parts=[];let cursor=0;
       for(const m of body.text.matchAll(new RegExp(RE.PARENTHETICAL_SPLITTER.source,'gmd'))){
         if(m.index>cursor)parts.push(slice(body,cursor,m.index));
         parts.push(slice(body,...m.indices[1]));cursor=m.index+m[0].length;
       }
       if(cursor<body.text.length)parts.push(slice(body,cursor));
-      for(const part of parts.reverse())if(part.text.length)push(RE.PARENTHETICAL.test(part.text)?TokenType.PARENTHETICAL:TokenType.DIALOGUE,remove(part,/^\n|\n$/g));
+      for(const part of parts.reverse())if(part.text.length)push(RE.PARENTHETICAL.test(part.text.trimStart())?TokenType.PARENTHETICAL:TokenType.DIALOGUE,remove(part,/^\n|\n$/g));
       push(TokenType.CHARACTER,trim(remove(character,/^@/)));
       push(TokenType.DIALOGUE_BEGIN,null,{dual:hasCaret?DualPosition.RIGHT:dual?DualPosition.LEFT:DualPosition.UNKNOWN});
       if(dual)push(TokenType.DUAL_DIALOGUE_BEGIN);

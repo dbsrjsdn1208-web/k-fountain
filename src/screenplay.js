@@ -7,6 +7,10 @@ import {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,mergeRuns,
 export {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,groupElements};
 export const DEFAULT_SETTINGS={font:'Noto Serif KR',size:12,numbering:'n',txtNumbering:'S#n.',numberMode:'output',follow:true,hashScenes:false,sNumberScenes:false,numericScenes:false,autoNumbers:true,autoCharacters:true,boldCharacters:true,hideOutline:false,theme:'default',previewEditMode:'source',showNotes:false};
 export const FONT_OPTIONS=[]; // Kept only for compatibility with pre-v2 saved work.
+export const CONTINUATION_LABELS={
+  en:{more:'(MORE)',continued:"(CONT'D)"},
+  ko:{more:'(계속)',continued:'(이어서)'},
+};
 export function plainTextDoc(text){return {type:'doc',content:text.replace(/\r\n?/g,'\n').split('\n').map(text=>({type:'paragraph',content:text?[{type:'text',text}]:[]}))};}
 function escaped(s){return s.replace(/([\\*_])/g,'\\$1');}
 export function fountainRuns(runs){return runs.map(r=>{
@@ -100,7 +104,7 @@ export function renderPreview(elements,{showNotes=false}={}){
 export function previewCSS(settings){
   const cfg={...DEFAULT_SETTINGS,...settings};
   const family=JSON.stringify(cfg.font||'Noto Serif KR');
-  return (themes[cfg.theme]||themes.default)+`\n/* Korean customizations; upstream layout and breaks retained. */\nbody{font-family:${family},"Noto Serif KR",serif;} :root{--font-size-print:${cfg.size}pt;--font-size-screen:${cfg.size*(cfg.theme==='cjk'?1.5:4/3)}px;} .character{font-weight:${cfg.boldCharacters?'700':'400'};} .action{white-space:pre-wrap;} .lyric{font-style:italic;} [data-source].is-current{outline:1px solid #dbe4d6;outline-offset:4px;} @media print{[data-source].is-current{outline:0;}}`;
+  return (themes[cfg.theme]||themes.default)+`\n/* Korean customizations; upstream layout and breaks retained. */\nbody{font-family:${family},"Noto Serif KR",serif;} :root{--font-size-print:${cfg.size}pt;--font-size-screen:${cfg.size*(cfg.theme==='cjk'?1.5:4/3)}px;} .character{font-weight:${cfg.boldCharacters?'700':'400'};} [data-token]{white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4;} .lyric{font-style:italic;} [data-source].is-current{outline:1px solid #dbe4d6;outline-offset:4px;} @media print{[data-source].is-current{outline:0;}}`;
 }
 export function exportFountain(elements){
   const cfg=elements.settings;let lines=elements.source.split('\n');

@@ -11,6 +11,17 @@ import {plainTextDoc,parseScreenplay,renderPreview,prepareSource,previewCSS,expo
 import {docxBuffer} from '../src/exports.js';
 const from=(s,settings={},names=['민수','영희'])=>parseScreenplay(plainTextDoc(s),names,settings);
 const tokens=s=>parse(s).tokens;
+
+test('rendered dialogue and directions retain consecutive spaces and indentation',()=>{
+  const e=parseScreenplay('@민서\n  공백    보존\n    (작게)\n\t끝');
+  const lines=e.model.tokens.filter(t=>['dialogue','parenthetical'].includes(t.type));
+  assert.deepEqual(lines.map(t=>[t.type,t.text]),[
+    ['dialogue','  공백    보존'],['parenthetical','    (작게)'],['dialogue','\t끝'],
+  ]);
+  const dom=new JSDOM(renderPreview(e));
+  assert.equal(dom.window.document.querySelector('.dialogue').textContent,'  공백    보존');
+  dom.window.close();
+});
 const clean=ts=>ts.map(({sourceLine,sourceStart,sourceEnd,sourceMap,sourceId,rawStart,rawEnd,note,...t})=>t);
 const upstream=fs.readFileSync(new URL('../vendor/fountain2html/src/fountain_parser.test.js',import.meta.url),'utf8');
 for(const m of upstream.matchAll(/const (TEXT_\d+) = `([\s\S]*?)`/g)){
