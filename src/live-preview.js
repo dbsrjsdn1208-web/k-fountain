@@ -23,7 +23,11 @@ export function projectBlock(block,source,selection,notes,{live=true,showNotes=f
   const add=(text,start,end,classes='')=>{const last=runs.at(-1);if(last&&last.classes===classes){last.text+=text;last.map.push(...Array.from({length:text.length},(_,i)=>end-start===text.length?[start+i,start+i+1]:[start,end]));}else runs.push({text,classes,map:Array.from({length:text.length},(_,i)=>end-start===text.length?[start+i,start+i+1]:[start,end])});};
   if(block.generated)add(block.generated,rec.sourceStart,rec.sourceStart,'preview-number');
   const selectedPairs=pairs.filter(p=>touches(selection,p.open[0],p.close[1]));
+  let line=0;
+  const hiddenLines=showNotes?[]:rec.hiddenLines||[];
   for(let i=rec.rawStart;i<rec.rawEnd;){
+    while(line<hiddenLines.length&&hiddenLines[line][1]<=i)line++;
+    if(line<hiddenLines.length&&hiddenLines[line][0]<=i){i=hiddenLines[line][1];continue;}
     const note=notes.find(([a,b])=>i>=a&&i<b);
     if(note){const end=Math.min(note[1],rec.rawEnd);if(source.startsWith('[[',note[0])?showNotes:live&&touches(selection,...note))add(source.slice(i,end),i,end,'preview-note');i=end;continue;}
     const unit=units.get(i);

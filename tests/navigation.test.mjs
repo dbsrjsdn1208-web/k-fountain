@@ -24,6 +24,15 @@ test('repeated dialogue and parentheticals retain their own exact ranges',()=>{
 test('multiline, emphasis, hidden notes, escapes, entities and emoji map to actual characters',()=>{
   verifyMap('!첫 줄 **굵게**\n둘째 _***강조***_ [[숨김 메모]] 다음 😊 & <글자>\n\\*문자\\* 한글 e\u0301').dom.window.close();
 });
+test('hiding note-only dialogue lines keeps intentional breaks and exact source offsets',()=>{
+  const source='@민서\n [[비공개]] [[메모]]\n[[여러 줄\n메모]]\n  들여쓴 말\n  \n마지막 [[인라인 메모]] 대사';
+  const p=verifyMap(source),dialogue=p.doc.querySelector('.dialogue');
+  assert.equal(dialogue.innerHTML,'  들여쓴 말<br>  <br>마지막  대사');
+  const record=p.elements.navigation.get(dialogue.dataset.token);
+  assert.equal(mappedPosition(record,{index:2,after:false}),source.indexOf('들여쓴'));
+  assert.match(renderPreview(p.elements,{showNotes:true}),/비공개/);
+  p.dom.window.close();
+});
 test('dual dialogue, titles, lyrics, centered lines and registered cues carry ranges',()=>{
   verifyMap('Title: **작품**\nAuthor: 저자\n\n.방 #7#\n\n민서 (전화)\n안녕\n둘째 줄\n\n(인물) ^\n(작게)\n안녕\n\n~노래\n~다음\n\n>가운데<\n>둘째<',['민서','(인물)']).dom.window.close();
 });

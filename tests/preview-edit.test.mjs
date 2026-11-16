@@ -31,6 +31,15 @@ test('full mode creates scenes and dialogue from an empty manuscript with real n
 test('cross-paragraph edits preserve hidden notes and can be undone',()=>{
   const a=app('첫 문단\n\n[[비밀 메모]]\n\n둘째 문단');a.select(1,a.input.value.length-1);a.type('새 내용');assert.match(a.input.value,/\[\[비밀 메모\]\]/);assert.match(a.input.value,/새 내용/);a.editor.history(-1);assert.equal(a.input.value,'첫 문단\n\n[[비밀 메모]]\n\n둘째 문단');a.close();
 });
+test('editing preview hides the entire note-only line without eating a real blank line',()=>{
+  const text='@민서\n[[메모]]\n첫 대사\n  \n둘째 대사',a=app(text,'source');
+  assert.match(a.main.querySelector('.dialogue').textContent,/^첫 대사\n  \n둘째 대사$/);
+  const start=text.indexOf('첫');
+  a.select(start);a.type('새 ');
+  assert.equal(a.input.value,'@민서\n[[메모]]\n새 첫 대사\n  \n둘째 대사');
+  assert.equal(a.main.querySelector('.dialogue').textContent,'새 첫 대사\n  \n둘째 대사');
+  a.close();
+});
 test('composition does not render over IME; commits one final edit',()=>{
   const a=app('처음');a.select(2);const initial=a.main.firstChild;a.main.dispatchEvent(new a.dom.window.CompositionEvent('compositionstart',{bubbles:true}));a.type('ㅎ','insertCompositionText');assert.equal(a.input.value,'처음');a.render();assert.equal(a.main.firstChild,initial);a.main.dispatchEvent(new a.dom.window.CompositionEvent('compositionend',{bubbles:true,data:'한글'}));assert.equal(a.input.value,'처음한글');a.editor.history(-1);assert.equal(a.input.value,'처음');a.close();
 });

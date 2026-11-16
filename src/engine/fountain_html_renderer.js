@@ -30,6 +30,10 @@ const INLINE_RE = {
   UNDERLINE: /(_{1}(?=.+_{1}))(.+?)(_{1})/g,
 };
 
+// Remove only lines occupied by notes. Fountain's intentional two-space line
+// breaks and notes on lines that contain dialogue keep their existing behavior.
+const noteOnlyLine=/^[ \t]*(?:\[\[(?!\[)(?:(?!\]\](?!\[))[\s\S])*?\]\](?!\[)[ \t]*)+(?:\n|$)/gm;
+
 // Inline HTML snippets to replace fountain syntax.
 //
 // TODO: Add support for escaped emphasis tags like '\*'.
@@ -102,9 +106,18 @@ function render(fountainObject, theme, options = {}) {
   for (const original of fountainObject.tokens) {
     const token={...original};
     const beforeBody=bodyBuf.length,beforeTitle=titlePageBuf.length;
+    let text=mapped(token.text||'',token.sourceMap);
+    const hiddenLines=[];
+    if(token.type===TokenType.DIALOGUE&&!options.showNotes){
+      text=replace(text,noteOnlyLine,(match,capture)=>{
+        const spans=capture(0).map.filter(Boolean);
+        if(spans.length)hiddenLines.push([spans[0][0],spans.at(-1)[1]]);
+        return literal('');
+      });
+    }
     const formatPairs=[],formatted=token.type===TokenType.NOTE&&options.showNotes
       ?join([literal('<span class="preview-note">'),escape(token.note||mapped(`[[${token.text||''}]]`)),literal('</span>')])
-      :inlineMapped(escape(mapped(token.text||'',token.sourceMap)),formatPairs,options.showNotes);
+      :inlineMapped(escape(text),formatPairs,options.showNotes);
     const display=visible(formatted);let prefix='';
     token.text = formatted.text;
     switch (token.type) {
@@ -201,7 +214,7 @@ function render(fountainObject, theme, options = {}) {
       const last=buffer.length-1;
       buffer[last]=buffer[last].replace(/^<(h1|h2|h3|p|hr|br)(?=[ >])/,(m)=>`${m} data-source="${token.sourceLine}" data-token="${token.sourceId}"`);
       const generated=visible(mapped(prefix)).text;
-      if(options.navigation&&/data-token=/.test(buffer[last]))options.navigation.set(String(token.sourceId),{type:token.type,rawStart:token.rawStart,rawEnd:token.rawEnd,sourceStart:token.sourceStart,sourceEnd:token.sourceEnd,formatPairs,text:generated+display.text,map:[...Array.from({length:generated.length},()=>[token.sourceStart,token.sourceStart]),...display.map]});
+      if(options.navigation&&/data-token=/.test(buffer[last]))options.navigation.set(String(token.sourceId),{type:token.type,rawStart:token.rawStart,rawEnd:token.rawEnd,sourceStart:token.sourceStart,sourceEnd:token.sourceEnd,formatPairs,hiddenLines,text:generated+display.text,map:[...Array.from({length:generated.length},()=>[token.sourceStart,token.sourceStart]),...display.map]});
     }
   }
 

@@ -88,7 +88,66 @@ function after(a,b){return a.part>b.part||a.part===b.part&&a.offset>b.offset;}
 
 function speechColumn(block){
   const cue=block.firstElementChild;
-  return {...flow([...block.children].slice(1),true),block,cue};
+  const model=flow([...block.children].slice(1),true);
+  const part=model.indexed.findLastIndex(item=>item.root.node.classList.contains('dialogue')&&item.text.trim());
+  const lastSpoken=part<0?{part:0,offset:0}:{part,offset:model.indexed[part].text.trimEnd().length};
+  return {...model,block,cue,lastSpoken};
+}
+
+function firstDialoguePart(model,from){
+  return model.indexed.findIndex((item,i)=>i>=from.part&&
+    item.root.node.classList.contains('dialogue')&&item.text.slice(i===from.part?from.offset:0).trim());
+}
+
+function includeLineBreak(model,point){
+  const text=model.indexed[point.part]?.text;
+  if(!text||!point.offset)return point;
+  const line=text.lastIndexOf('\n',point.offset-1)+1;
+  if(!text.slice(line,point.offset).trim())return point;
+  const breakAfter=/^[ \t]*\n/.exec(text.slice(point.offset));
+  if(!breakAfter)return point;
+  const offset=point.offset+breakAfter[0].length;
+  return offset===text.length?{part:point.part+1,offset:0}:{part:point.part,offset};
+}
+
+// Measure the first visible row in the full fragment, at the exact column width
+// it will have on paper. A blank line or an opening direction cannot satisfy it.
+function firstRowEnd(paragraph){
+  const range=paragraph.ownerDocument.createRange();
+  const {root}=indexInline(paragraph);
+  let row=null,end=0;
+  function visit({node,children,start}){
+    if(node.nodeType!==3)return children.every(visit);
+    for(const {index,segment} of graphemes.segment(node.data)){
+      if(!segment.trim())continue;
+      range.setStart(node,index);
+      range.setEnd(node,index+segment.length);
+      const rect=range.getBoundingClientRect();
+      if(!rect.width||!rect.height)continue;
+      const middle=(rect.top+rect.bottom)/2;
+      if(row&&(middle<row.top||middle>=row.bottom))return false;
+      row??=rect;
+      end=start+index+segment.length;
+    }
+    return true;
+  }
+  visit(root);
+  return end;
+}
+
+function openingRows(models,starts,full,dual){
+  const columns=dual?[...full.children]:[full];
+  return models.map((model,i)=>{
+    const start=starts[i];
+    if(completed(model,start))return start;
+    const part=firstDialoguePart(model,start);
+    if(part<0)return model.end;
+    const paragraph=[...columns[i].children].find(node=>node.classList.contains('dialogue')&&node.textContent.trim());
+    const offset=(part===start.part?start.offset:0)+(paragraph?firstRowEnd(paragraph):0);
+    const firstRow=includeLineBreak(model,{part,offset});
+    // Never split off a continuation consisting of only whitespace or directions.
+    return after(model.lastSpoken,firstRow)?firstRow:model.end;
+  });
 }
 
 function speechPiece(model,from,to,labels) {
@@ -106,19 +165,20 @@ function speechPiece(model,from,to,labels) {
   return column;
 }
 
-function furthest(model,start,check) {
+function furthest(model,start,check,minimum=start) {
   if(check(model.end))return model.end;
   // Prefer word breaks. A very long word can still wrap by grapheme.
   for(const points of [model.boundaries,model.fallback]){
-    let lo=0,hi=points.length-1,best=start;
+    let lo=0,hi=points.length-1,best=minimum;
     while(lo<=hi){
-      const mid=(lo+hi)>>1,point=points[mid];
-      if(!after(point,start)){lo=mid+1;continue;}
+      const mid=(lo+hi)>>1;
+      const point=model.cue?includeLineBreak(model,points[mid]):points[mid];
+      if(!after(point,minimum)){lo=mid+1;continue;}
       if(check(point)){best=point;lo=mid+1;}else hi=mid-1;
     }
     if(after(best,start))return best;
   }
-  return start;
+  return minimum;
 }
 
 export function paginatePrint(doc,language='en') {
@@ -154,8 +214,9 @@ export function paginatePrint(doc,language='en') {
       if(tryPiece(whole)){append(whole);if(title)finishTitle();continue;}
       const dual=block.classList.contains('dual-dialogue-block');
       const speech=dual||block.classList.contains('dialogue-block');
-      // Keep short speeches and paragraphs together when a fresh page suffices.
-      if(used){
+      // Prose can stay together if it fits on a new page. A speech can begin
+      // on this page as long as its cue and first row fit together.
+      if(used&&!speech){
         const prior={sheet,area,content,used};
         newPage();
         if(tryPiece(whole)){append(whole);if(title)finishTitle();continue;}
@@ -171,13 +232,25 @@ export function paginatePrint(doc,language='en') {
           if(!dual)return columns[0];
           const row=block.cloneNode(false);row.append(...columns);return row;
         }
-        const ends=[...starts];
+        let ends=[...starts];
+        if(speech){
+          const full=piece(models.map(model=>model.end));
+          content.append(full);
+          if(fits()){used++;break;}
+          ends=openingRows(models,starts,full,dual);
+          full.remove();
+          if(!tryPiece(piece(ends))){
+            if(used){newPage();continue;}
+            throw Error('인물명과 첫 대사가 한 페이지에 들어가지 않습니다.');
+          }
+        }
         for(const [i,model] of models.entries()){
           if(completed(model,starts[i]))continue;
           ends[i]=furthest(model,starts[i],end=>{
+            if(speech&&!completed(model,end)&&!after(model.lastSpoken,end))return false;
             const candidate=[...ends];candidate[i]=end;
             const node=piece(candidate);return node&&tryPiece(node);
-          });
+          },ends[i]);
         }
         if(!ends.some((end,i)=>after(end,starts[i]))){
           if(used){newPage();continue;}
