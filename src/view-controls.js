@@ -6,8 +6,9 @@ export function validateView(value={}){
   return view;
 }
 export function installViewControls({doc,input,frame,isBusy=()=>false,onLayout=()=>{},restoreFocus=()=>{}}){
-  const win=doc.defaultView,key='k-fountain.view.v1',$=s=>doc.querySelector(s),main=$('#main-app'),divider=$('#pane-divider'),menu=$('#view-menu'),button=$('#view');
-  let view={...VIEW_DEFAULTS},pending=null,drag=null;
+  const win=doc.defaultView,key='k-fountain.view.v1',$=s=>doc.querySelector(s),main=$('#main-app'),divider=$('#pane-divider');
+  const choices=[...doc.querySelectorAll('[data-layout]')];
+  let view={...VIEW_DEFAULTS},pending=null,focusPending=false,drag=null;
   try{view=validateView(JSON.parse(win.localStorage.getItem(key)||'{}'));}catch{}
   const narrow=win.matchMedia('(max-width:700px)');
   const apply=()=>{
@@ -15,8 +16,8 @@ export function installViewControls({doc,input,frame,isBusy=()=>false,onLayout=(
     main.classList.toggle('single-pane',divider.hidden);
     main.style.setProperty('--source-share',view[narrow.matches?'vertical':'horizontal']);
     input.style.fontSize=view.size+'px';
-    $('#view-source').checked=view.source;$('#view-preview').checked=view.preview;
-    $('#view-source').disabled=view.source&&!view.preview;$('#view-preview').disabled=view.preview&&!view.source;
+    const layout=view.source?(view.preview?'split':'source'):'preview';
+    for(const choice of choices)choice.setAttribute('aria-pressed',String(choice.dataset.layout===layout));
     $('#source-size').value=view.size;
     divider.setAttribute('aria-orientation',narrow.matches?'horizontal':'vertical');
     divider.setAttribute('aria-valuenow',String(view[narrow.matches?'vertical':'horizontal']));
@@ -24,13 +25,12 @@ export function installViewControls({doc,input,frame,isBusy=()=>false,onLayout=(
     onLayout(view);
   };
   const change=patch=>{if(isBusy()){pending={...(pending||{}),...patch};return;}view=validateView({...view,...patch});apply();};
-  const flush=()=>{if(pending&&!isBusy()){const patch=pending;pending=null;change(patch);}};
-  const close=(focus=false)=>{menu.hidden=true;button.setAttribute('aria-expanded','false');if(focus)restoreFocus();};
-  button.onclick=()=>{menu.hidden=!menu.hidden;button.setAttribute('aria-expanded',String(!menu.hidden));};
-  doc.addEventListener('pointerdown',e=>{if(!e.target.closest('.view-tools'))close();});
-  menu.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close(true);}});
-  $('#view-source').onchange=e=>change({source:e.target.checked});
-  $('#view-preview').onchange=e=>change({preview:e.target.checked});
+  const flush=()=>{if(pending&&!isBusy()){const patch=pending;pending=null;change(patch);if(focusPending){focusPending=false;restoreFocus();}}};
+  function selectLayout(layout,{focus=false}={}){
+    change({source:layout!=='preview',preview:layout!=='source'});
+    if(focus){if(isBusy())focusPending=true;else restoreFocus();}
+  }
+  for(const choice of choices)choice.onclick=()=>selectLayout(choice.dataset.layout,{focus:true});
   $('#source-size').onchange=e=>change({size:e.target.value});
   $('#view-reset').onclick=()=>change({...VIEW_DEFAULTS});
   input.addEventListener('wheel',e=>{if(!e.ctrlKey||!e.deltaY)return;e.preventDefault();change({size:view.size+(e.deltaY<0?1:-1)});},{passive:false});
@@ -47,5 +47,5 @@ export function installViewControls({doc,input,frame,isBusy=()=>false,onLayout=(
     if([down,up,'Home','End'].includes(e.key)){e.preventDefault();change({[axis]:e.key==='Home'?20:e.key==='End'?80:view[axis]+(e.key===down?5:-5)});}
   });
   narrow.addEventListener('change',apply);apply();
-  return {get state(){return {...view};},flush,close};
+  return {get state(){return {...view};},flush,selectLayout};
 }

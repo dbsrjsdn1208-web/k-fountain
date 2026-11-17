@@ -72,7 +72,7 @@ test('preview toggle defaults off, mode persists, and live edits reach the real 
 
 test('PDF print receives the last live edit with cursor syntax removed',async()=>{
   const a=await app();try{
-    a.edit('.방\n\n원래 **대사**');await a.flush();a.q('#preview-edit').click();const frame=a.q('#preview'),d=frame.contentDocument,main=d.querySelector('main'),node=d.querySelector('.bold').firstChild;
+    a.edit('.방\n\n원래 **대사**');await a.flush();a.q('#preview-edit').click();const frame=a.q('#preview'),d=frame.contentDocument,main=d.querySelector('main'),node=d.querySelector('.bold:not(.preview-syntax)').firstChild;
     d.getSelection().setBaseAndExtent(node,0,node,node.length);d.dispatchEvent(new d.defaultView.Event('selectionchange'));
     main.dispatchEvent(new d.defaultView.InputEvent('beforeinput',{bubbles:true,cancelable:true,inputType:'insertText',data:'최종'}));
     let printed='';const append=a.w.document.body.append.bind(a.w.document.body);a.w.document.body.append=(el)=>{append(el);if(el.id==='print-frame'){Object.defineProperty(el.contentDocument,'fonts',{value:{ready:Promise.resolve()}});el.contentWindow.focus=()=>{};el.contentWindow.print=()=>{printed=el.contentDocument.querySelector('main').textContent;assert.equal(el.contentDocument.querySelectorAll('.preview-syntax,.preview-note').length,0);};}};
@@ -86,7 +86,7 @@ test('preview movement updates source selection without taking focus or adding h
   const d=a.q('#preview').contentDocument,main=d.querySelector('main'),node=d.querySelector('.dialogue span').firstChild;
   main.focus();d.getSelection().setBaseAndExtent(node,2,node,2);d.dispatchEvent(new d.defaultView.Event('selectionchange'));await a.flush();
   assert.equal(a.input.selectionEnd,6);assert.notEqual(a.w.document.activeElement,a.input);
-  a.q('#view').click();a.q('#view-source').click();assert.equal(a.input.hidden,true);a.q('#view-source').click();assert.equal(a.input.hidden,false);
+  a.q('#view').click();a.q('[data-layout="preview"]').click();assert.equal(a.input.hidden,true);a.q('#view').click();a.q('[data-layout="split"]').click();assert.equal(a.input.hidden,false);
   assert.equal(a.input.value,'@민서\n첫 대사\n둘째 대사');assert.deepEqual(a.errors,[]);
  }finally{a.dom.window.close();}
 });
@@ -116,4 +116,20 @@ test('new document cannot replace the manuscript while a save picker is pending'
  const saving=a.q('#save').onclick();await a.q('#new').onclick();assert.equal(a.input.value,'저장 중 원고');
  release({name:'pending.fountain',async createWritable(){return {async write(){},async close(){}};}});await saving;assert.equal(a.q('#title').value,'pending');
  }finally{a.dom.window.close();}
+});
+
+test('scene search jumps to the matching source heading without changing the draft',async()=>{
+  const a=await app();try{
+    const source='.복도\n\n첫 지문\n\n.연습실\n\n둘째 지문\n\n.복도\n\n마지막 지문';
+    a.edit(source);await a.flush();a.q('#scenes').click();
+    const panel=a.q('#scene-panel'),search=panel.querySelector('input');
+    assert.equal(panel.querySelectorAll('li').length,3);
+    search.value='3 복도';search.dispatchEvent(new a.w.Event('input'));
+    assert.equal(panel.querySelectorAll('li').length,1);
+    search.dispatchEvent(new a.w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+    assert.equal(a.input.selectionStart,source.lastIndexOf('.복도'));
+    assert.equal(a.input.value,source);
+    assert.equal(panel.querySelector('[aria-current]').textContent,'3 복도');
+    assert.deepEqual(a.errors,[]);
+  }finally{a.w.close();}
 });

@@ -7,6 +7,7 @@ import {FileSession,handleDB} from './file-store.js';
 import {SourceEdits,installPreviewNavigation,revealCaret} from './preview-navigation.js';
 import {PreviewEditor,editorCSS} from './preview-editor.js';
 import {installViewControls} from './view-controls.js';
+import {installSceneOutline,installToolbarMenus} from './workspace-ui.js';
 import {printDocument} from './print-document.js';
 
 const STORAGE='k-fountain.document.v2',LEGACY='jangmyeon.document.v1';
@@ -30,11 +31,57 @@ try{const saved=localStorage.getItem(STORAGE)||localStorage.getItem(LEGACY);if(s
 const $=s=>document.querySelector(s),files=new FileSession();
 let elements,framePending=0,composing=false,dirty=false,previewText=null,previewKey='',toastTimer,recoveryTimer,revision=0;
 let history=[],historyIndex=-1,lastEditTime=0,lastEditType='',installPrompt;
-let previewEditor,viewControls,lastPane='source',lastPreviewSelection=null,followFrame=0;
+let previewEditor,viewControls,sceneOutline,outlineVersion,lastPane='source',lastPreviewSelection=null,followFrame=0;
 document.querySelector('#app').innerHTML=`
-<header id="header-panel"><div class="title">K-파운틴</div><p>Fountain으로 쓰고, 대본으로 미리 봅니다.<br><span>Ctrl+B 굵게 · Ctrl+I 기울임 · Ctrl+U 밑줄</span></p><button id="install" hidden>앱 설치</button></header>
-<div id="top-panel"><div class="file-tools"><button id="new">새 문서</button><button id="open">열기</button><input id="title" aria-label="파일 이름" value="${esc(state.title)}"><button id="save" title="Ctrl+S">저장</button><button id="save-as" title="Ctrl+Shift+S">다른 이름으로 저장</button></div><div class="output-tools"><button id="preview-edit" aria-pressed="false">미리보기 편집</button><button id="pdf">PDF / 인쇄</button><button id="docx">DOCX</button><button id="txt">TXT</button><div class="view-tools"><button id="view" aria-expanded="false" aria-controls="view-menu">보기</button><div id="view-menu" hidden><label><input id="view-source" type="checkbox"> 원본 화면</label><label><input id="view-preview" type="checkbox"> 미리보기 화면</label><label for="source-size">원본 글자 크기 <input id="source-size" type="number" min="10" max="40" step="1"> px</label><small>원본 위에서 Ctrl+휠로 조절</small><button id="view-reset">화면 배치 초기화</button></div></div><button id="settings">설정</button></div></div>
-<div id="main-app"><textarea id="fountain-editor" aria-label="Fountain 원고" spellcheck="false" wrap="soft" placeholder=".장소 / 시간&#10;&#10;@인물&#10;대사"></textarea><div id="pane-divider" role="separator" tabindex="0" aria-label="원본과 미리보기 크기 조절" aria-valuemin="20" aria-valuemax="80"></div><section id="html-render"><iframe id="preview" title="대본 미리보기" sandbox="allow-same-origin allow-modals"></iframe></section></div>
+<header id="header-panel"><div class="title">K-파운틴</div><button id="install" hidden>앱 설치</button></header>
+<div id="top-panel">
+  <div class="file-tools">
+    <button id="scenes" aria-expanded="false" aria-controls="scene-panel">장면</button>
+    <div class="toolbar-group">
+      <button id="file-menu-button" data-toolbar-menu aria-expanded="false" aria-controls="file-menu">파일</button>
+      <div id="file-menu" class="toolbar-menu toolbar-menu-start" role="group" aria-label="파일 작업" hidden>
+        <button id="new" data-menu-command>새 문서</button>
+        <button id="open" data-menu-command>열기</button>
+        <button id="save-as" data-menu-command>다른 이름으로 저장 <kbd>Ctrl+Shift+S</kbd></button>
+      </div>
+    </div>
+    <input id="title" aria-label="파일 이름" value="${esc(state.title)}">
+    <button id="save" title="Ctrl+S">저장</button>
+  </div>
+  <div class="output-tools">
+    <button id="preview-edit" aria-pressed="false">미리보기 편집</button>
+    <div class="toolbar-group">
+      <button id="export-menu-button" data-toolbar-menu aria-expanded="false" aria-controls="export-menu">내보내기</button>
+      <div id="export-menu" class="toolbar-menu" role="group" aria-label="내보내기 형식" hidden>
+        <button id="pdf" data-menu-command>PDF / 인쇄</button>
+        <button id="docx" data-menu-command>Word 문서 (.docx)</button>
+        <button id="txt" data-menu-command>읽기용 텍스트 (.txt)</button>
+      </div>
+    </div>
+    <div class="toolbar-group">
+      <button id="view" data-toolbar-menu aria-expanded="false" aria-controls="view-menu">보기</button>
+      <div id="view-menu" class="toolbar-menu" role="group" aria-label="화면 배치" hidden>
+        <div class="layout-options" role="group" aria-label="표시할 화면">
+          <button data-layout="source" aria-pressed="false" data-menu-command>원본만</button>
+          <button data-layout="split" aria-pressed="true" data-menu-command>나란히</button>
+          <button data-layout="preview" aria-pressed="false" data-menu-command>미리보기만</button>
+        </div>
+        <label for="source-size">원본 글자 크기 <input id="source-size" type="number" min="10" max="40" step="1"> px</label>
+        <small>원본에서 Ctrl+휠로 조절</small>
+        <button id="view-reset">화면 배치 초기화</button>
+      </div>
+    </div>
+    <button id="settings">설정</button>
+  </div>
+</div>
+<div id="workspace">
+  <aside id="scene-panel" aria-labelledby="scene-heading" hidden>
+    <div class="scene-panel-heading"><h2 id="scene-heading">장면 목록</h2><button id="scene-close" type="button">닫기</button></div>
+    <input type="search" aria-label="장면 제목 또는 번호 찾기" placeholder="장면 찾기">
+    <nav aria-label="장면 이동"><ol id="scene-list"></ol><p id="scene-empty" aria-live="polite"></p></nav>
+  </aside>
+  <div id="main-app"><textarea id="fountain-editor" aria-label="Fountain 원고" spellcheck="false" wrap="soft" placeholder=".장소 / 시간&#10;&#10;@인물&#10;대사"></textarea><div id="pane-divider" role="separator" tabindex="0" aria-label="원본과 미리보기 크기 조절" aria-valuemin="20" aria-valuemax="80"></div><section id="html-render"><iframe id="preview" title="대본 미리보기" sandbox="allow-same-origin allow-modals"></iframe></section></div>
+</div>
 <footer id="footer-panel"><span id="file-status">${recovered?'임시 원고 복원됨':'파일을 저장해 주세요'}</span><span id="recovery-status"></span><span class="credit"><a href="https://github.com/wixette/fountain2html" target="_blank" rel="noopener">fountain2html</a> · Apache-2.0</span></footer>
 <input id="file-input" type="file" accept=".fountain,.txt,.json" hidden>
 <dialog id="settings-dialog"><div class="dialog-heading"><h2>설정</h2><button type="button" data-close="settings-dialog" aria-label="설정 닫기">닫기</button></div><p class="hint">바꾸는 즉시 적용되며 다음 실행에도 유지됩니다.</p>
@@ -84,7 +131,7 @@ function queueRecovery(){clearTimeout(recoveryTimer);recoveryTimer=setTimeout(sa
 function saveRecovery(){try{state.text=input.value;localStorage.setItem(STORAGE,JSON.stringify(state));$('#recovery-status').textContent='임시 복구본 보관됨';return true;}catch{$('#recovery-status').textContent='임시 복구본 저장 실패';return false;}}
 function queueRender(){if(!framePending)framePending=requestAnimationFrame(()=>{framePending=0;renderNow();});}
 const previewDoc=frame.contentDocument;
-previewDoc.open();previewDoc.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>K-파운틴</title><style id="fonts"></style><style id="style"></style></head><body><main></main></body></html>');previewDoc.close();
+previewDoc.open();previewDoc.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>K-파운틴</title><style id="fonts"></style><style id="style"></style></head><body><main tabindex="-1"></main></body></html>');previewDoc.close();
 const faces=[...document.styleSheets].flatMap(s=>{try{return [...s.cssRules].filter(r=>r.type===5).map(r=>r.cssText);}catch{return [];}}).join('\n');
 previewDoc.querySelector('#fonts').textContent=faces;
 function renderNow(){
@@ -97,6 +144,12 @@ function renderNow(){
     navigationSnapshot={records:elements.navigation,version:sourceEdits.version};
     if(key!==previewKey){previewDoc.querySelector('#style').textContent=previewCSS(state.settings)+editorCSS;input.style.fontFamily=`${JSON.stringify(state.settings.font)},"Noto Serif KR",serif`;}
     frame.contentWindow.scrollTo(0,scroll);previewEditor?.decorate();previewText=input.value;previewKey=key;
+    outlineVersion=sourceEdits.version;
+    const entries=elements.model.tokens.filter(token=>token.type==='scene_heading').map(token=>({
+      pos:token.rawStart, title:elements[token.sourceLine]?.displayText||token.text,
+      label:elements[token.sourceLine]?.label||'',
+    }));
+    sceneOutline.update(entries,input.selectionEnd);
   }followCaret();
 }
 function followCaret(){
@@ -124,6 +177,7 @@ function previewSelection(selection,version){
   if(anchor===null||focus===null)return;
   lastPreviewSelection={anchor,focus,version:sourceEdits.version};lastPane='preview';
   input.setSelectionRange(Math.min(anchor,focus),Math.max(anchor,focus),focus<anchor?'backward':'forward');
+  sceneOutline.locate(focus);
   if(followFrame)return;
   followFrame=requestAnimationFrame(()=>{
     followFrame=0;if(lastPane!=='preview'||previewEditor.busy()||!state.settings.follow||input.hidden)return;
@@ -132,14 +186,22 @@ function previewSelection(selection,version){
   });
 }
 function restoreWorkFocus(){
-  if(lastPane==='preview'&&!frame.parentElement.hidden){
+  if(!frame.parentElement.hidden&&(lastPane==='preview'||input.hidden)){
+    const fromSource=lastPane==='source';
+    lastPane='preview';
+    if(previewEditor.enabled&&fromSource){focusPreviewAtSource();return;}
     if(previewEditor.enabled&&lastPreviewSelection){
       const anchor=sourceEdits.map(lastPreviewSelection.anchor,lastPreviewSelection.version),focus=sourceEdits.map(lastPreviewSelection.focus,lastPreviewSelection.version);
       if(anchor!==null&&focus!==null){previewEditor.selection={anchor,focus};previewEditor.updateLive(false);previewEditor.restoreSelection();return;}
     }
     previewDoc.querySelector('main').focus({preventScroll:true});
   }else if(!input.hidden)input.focus({preventScroll:true});
-  else frame.contentWindow.focus();
+}
+function focusPreviewAtSource(){
+  const {selectionStart:start,selectionEnd:end,selectionDirection}=input;
+  previewEditor.selection=selectionDirection==='backward'?{anchor:end,focus:start}:{anchor:start,focus:end};
+  previewEditor.updateLive(false);
+  previewEditor.restoreSelection();
 }
 function layoutChanged(){
   requestAnimationFrame(()=>{
@@ -157,7 +219,32 @@ previewEditor=new PreviewEditor({doc:previewDoc,input,edits:sourceEdits,getSnaps
   apply:(text,start,end,type,auto)=>{suppressFollow=true;input.value=text;input.setSelectionRange(start,end);if(auto)normalize(true);record(type);changed();},
   remember:()=>{if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();},undo:restoreHistory,
   refresh:()=>{previewText=null;renderNow();},notify:toast,save:saveFile});
-$('#preview-edit').onclick=()=>{if(previewEditor.toggle(!previewEditor.enabled))$('#preview-edit').setAttribute('aria-pressed',String(previewEditor.enabled));};
+function jumpToScene(scene){
+  const pos=sourceEdits.map(scene.pos,outlineVersion);
+  if(pos===null){renderNow();return;}
+  renderNow();
+  const target=[...previewDoc.querySelectorAll('.screen-heading[data-token]')].find(heading=>navigationSnapshot.records.get(heading.dataset.token)?.rawStart===pos);
+  input.setSelectionRange(pos,pos);
+  suppressFollow=true;
+  if(!input.hidden)revealCaret(input,pos);
+  if(lastPane==='preview'&&previewEditor.enabled&&!frame.parentElement.hidden){
+    previewEditor.selection={anchor:pos,focus:pos};
+    previewEditor.updateLive(false);
+    previewEditor.restoreSelection();
+  }else if(!input.hidden)input.focus({preventScroll:true});
+  else previewDoc.querySelector('main').focus({preventScroll:true});
+  if(!frame.parentElement.hidden)target?.scrollIntoView?.({block:'nearest'});
+  sceneOutline.locate(pos);
+}
+$('#preview-edit').onclick=()=>{
+  if(composing)return;
+  if(!previewEditor.toggle(!previewEditor.enabled))return;
+  if(previewEditor.enabled){
+    if(frame.parentElement.hidden)viewControls.selectLayout('split');
+    focusPreviewAtSource();
+  }else restoreWorkFocus();
+  $('#preview-edit').setAttribute('aria-pressed',String(previewEditor.enabled));
+};
 document.addEventListener('pointerdown',()=>previewEditor.clearSelection());
 input.addEventListener('focus',()=>{lastPane='source';previewEditor.clearSelection();});
 installPreviewNavigation({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,isComposing:()=>composing||previewEditor.enabled||input.hidden,onNavigate:()=>{suppressFollow=true;}});
@@ -180,7 +267,8 @@ input.addEventListener('keydown',event=>{
   if((event.ctrlKey||event.metaKey)&&['b','i','u'].includes(key)){event.preventDefault();history[historyIndex]=snapshot();const edit=toggleMarkup(input.value,input.selectionStart,input.selectionEnd,{b:'**',i:'*',u:'_'}[key]);applyText(edit.text,edit.start,edit.end);return;}
   if((event.ctrlKey||event.metaKey)&&(key==='z'||key==='y')){event.preventDefault();restoreHistory(key==='y'||event.shiftKey?1:-1);}
 });
-input.addEventListener('keyup',followCaret);input.addEventListener('click',()=>{suppressFollow=false;followCaret();});input.addEventListener('select',followCaret);
+const sourcePositionChanged=()=>{sceneOutline.locate(input.selectionEnd);followCaret();};
+input.addEventListener('keyup',sourcePositionChanged);input.addEventListener('click',()=>{suppressFollow=false;sourcePositionChanged();});input.addEventListener('select',sourcePositionChanged);
 document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'&&!composing){event.preventDefault();saveFile(event.shiftKey);}});
 function filename(){return (state.title.trim()||'제목 없는 시나리오').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\.fountain$/i,'');}
 function download(data,name,type='text/plain;charset=utf-8'){const blob=data instanceof Blob?data:new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
@@ -265,9 +353,10 @@ if('serviceWorker'in navigator&&location.protocol!=='file:'){
 window.addEventListener('pagehide',saveRecovery);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)saveRecovery();});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+sceneOutline=installSceneOutline({panel:$('#scene-panel'),button:$('#scenes'),previewDoc,onJump:jumpToScene,canJump:()=>!composing&&!previewEditor.busy()});
+installToolbarMenus($('#top-panel'),previewDoc);
 viewControls=installViewControls({doc:document,input,frame,isBusy:()=>composing||previewEditor.busy(),onLayout:layoutChanged,restoreFocus:restoreWorkFocus});
 for(const doc of [document,previewDoc])doc.addEventListener('compositionend',()=>queueMicrotask(()=>viewControls.flush()));
-previewDoc.addEventListener('pointerdown',()=>viewControls.close());
 resetHistory();syncSettings();renderNow();
 if(recoveryProblem)toast('기존 복구본을 읽지 못했습니다. 기존 데이터는 보존되어 있습니다.');else saveRecovery();
 // Recovered text must never silently reconnect to a separately persisted file handle.
