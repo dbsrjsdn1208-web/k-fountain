@@ -33,6 +33,7 @@ let elements,framePending=0,composing=false,dirty=false,previewText=null,preview
 let history=[],historyIndex=-1,lastEditTime=0,lastEditType='',installPrompt;
 let previewEditor,viewControls,sceneOutline,outlineVersion,lastPane='source',lastPreviewSelection=null,followFrame=0;
 let typewriterFrame=0;
+let pausedPreview=null;
 document.querySelector('#app').innerHTML=`
 <header id="header-panel"><div class="title">K-파운틴</div><button id="install" hidden>앱 설치</button></header>
 <div id="top-panel">
@@ -210,6 +211,18 @@ function focusPreviewAtSource(){
   previewEditor.updateLive(false);
   previewEditor.restoreSelection();
 }
+function previewViewport(){
+  const win=frame.contentWindow;
+  return {scroll:win.scrollY,width:win.innerWidth,height:win.innerHeight};
+}
+function pausedPreviewAnchor(selection){
+  const pause=pausedPreview;
+  if(!pause||pause.version!==sourceEdits.version||pause.key!==previewKey||
+    pause.selection.anchor!==selection.anchor||pause.selection.focus!==selection.focus)return null;
+  const viewport=previewViewport();
+  if(viewport.width!==pause.viewport.width||viewport.height!==pause.viewport.height||Math.abs(viewport.scroll-pause.viewport.scroll)>1)return null;
+  return pause;
+}
 function typewriterActive(){return input.parentElement.classList.contains('typewriter-active');}
 function centerSourceCaret(){
   const pos=input.selectionDirection==='backward'?input.selectionStart:input.selectionEnd;
@@ -265,16 +278,19 @@ $('#preview-edit').onclick=()=>{
   if(previewEditor.enabled){
     const selection=previewEditor.readSelection();
     const caret=previewEditor.caretRect();
+    const visible=selection&&caret?.height&&caret.top>=0&&caret.bottom<=frame.contentWindow.innerHeight;
     previewEditor.toggle(false);
-    if(selection&&caret?.height&&caret.top>=0&&caret.bottom<=frame.contentWindow.innerHeight){
+    if(visible){
       const next=renderedPositionRect(previewDoc,navigationSnapshot.records,selection.focus);
       if(next?.height)frame.contentWindow.scrollBy(0,next.top-caret.top);
     }
     restoreWorkFocus();
+    pausedPreview=visible?{selection,top:caret.top,version:sourceEdits.version,key:previewKey,viewport:previewViewport()}:null;
   }else{
     const hidden=frame.parentElement.hidden;
     const selection=sourceSelection();
-    const anchor=hidden?{selection,top:null}:visiblePreviewAnchor(previewDoc,navigationSnapshot.records,selection);
+    const anchor=hidden?{selection,top:null}:pausedPreviewAnchor(selection)||visiblePreviewAnchor(previewDoc,navigationSnapshot.records,selection);
+    pausedPreview=null;
     if(hidden)viewControls.selectLayout('split');
     previewEditor.toggle(true,anchor.selection,anchor.top);
   }
