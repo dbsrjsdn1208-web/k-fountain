@@ -1,8 +1,23 @@
-import {prepareSource,fountainRuns,DEFAULT_SETTINGS,numberSceneLine} from './screenplay.js';
+import {prepareSource,fountainRuns,DEFAULT_SETTINGS,numberSceneLine,matchCharacter} from './screenplay.js';
 import {parse} from './engine/fountain_parser.js';
 
 export const normalizeNewlines=s=>s.replace(/\r\n?/g,'\n');
 export function cleanNames(value){return [...new Set(value.split(/[\n,]/).map(s=>s.trim().replace(/^@/,'')).filter(s=>s&&!/[\n^<>]/.test(s)))];}
+export function characterCueOnEnter(text,position,names){
+  if(!names.length||position<0||position>text.length||!/^\r?(?:\n|$)/.test(text.slice(position)))return null;
+  const start=position?text.lastIndexOf('\n',position-1)+1:0;
+  const previousStart=start>1?text.lastIndexOf('\n',start-2)+1:0;
+  if(start&&text.slice(previousStart,start-1).trim())return null;
+  const line=text.slice(start,position);
+  const cue=matchCharacter(line,names);
+  if(!cue||cue.explicit||/^[ \t]*[.!#>~=]/.test(line))return null;
+  const excluded=/\/\*[\s\S]*?(?:\*\/|$)|\[\[[\s\S]*?(?:\]\]|$)/g;
+  for(const match of text.slice(0,position).matchAll(excluded)){
+    if(match.index+match[0].length>start)return null;
+  }
+  return start+line.search(/\S/);
+}
+
 export function normalizeText(text,names,settings){
   const cfg={...DEFAULT_SETTINGS,...settings},source=prepareSource(text,names,cfg);
   if(!cfg.autoNumbers||cfg.numberMode!=='source')return source;

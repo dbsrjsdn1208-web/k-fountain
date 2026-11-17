@@ -34,9 +34,8 @@ main.preview-blank-active{caret-color:transparent;}
 @keyframes preview-caret-blink{50%{opacity:0;}}
 @media(prefers-reduced-motion:reduce){#preview-blank-caret{animation:none;}}
 .preview-raw{display:block;box-sizing:border-box;width:100%;min-height:3em;resize:none;font:inherit;line-height:1.5;white-space:pre-wrap;border:1px solid #3594cf;border-radius:3px;padding:8px;color:inherit;background:transparent;caret-color:currentColor;}
-.preview-slot{min-height:1.5em;white-space:pre-wrap;margin:0;}
-.preview-slot.preview-gap{height:0;min-height:0;position:relative;line-height:0;}
-.preview-gap>span{position:absolute;inset-inline-start:0;top:0;min-width:1em;line-height:var(--default-line-height,1.5);}
+.preview-slot{min-height:var(--default-line-height,1.5em);white-space:pre-wrap;margin:0;}
+.preview-slot>[class],.preview-slot>span{line-height:inherit;}
 .preview-number{user-select:none;}
 .preview-syntax{color:#77818d;}
 .preview-note{color:#77818d;font-weight:400;font-style:normal;text-decoration:none;white-space:pre-wrap;}
@@ -50,8 +49,8 @@ main.preview-blank-active{caret-color:transparent;}
 `;
 
 export class PreviewEditor{
-  constructor({doc,input,getSnapshot,edits,getMode,getShowNotes=()=>false,onSelection=()=>{},apply,remember,undo,refresh,notify,save}){
-    Object.assign(this,{doc,input,getSnapshot,edits,getMode,getShowNotes,onSelection,apply,remember,undo,refresh,notify,save});
+  constructor({doc,input,getSnapshot,edits,getMode,getShowNotes=()=>false,onSelection=()=>{},onRelayout=()=>{},cueAt=()=>null,apply,remember,undo,refresh,notify,save}){
+    Object.assign(this,{doc,input,getSnapshot,edits,getMode,getShowNotes,onSelection,onRelayout,cueAt,apply,remember,undo,refresh,notify,save});
     this.main=doc.querySelector('main');this.enabled=false;this.composing=false;this.selection=null;this.points=[];this.pendingLine=null;
     this.blankCaret=doc.createElement('div');this.blankCaret.id='preview-blank-caret';this.blankCaret.hidden=true;
     this.blankCaret.setAttribute('aria-hidden','true');doc.body.append(this.blankCaret);
@@ -77,10 +76,10 @@ export class PreviewEditor{
   full(){return this.enabled;}
   live(){return this.enabled&&this.getMode()!=='full';}
   busy(){return this.composing;}
-  toggle(enabled,selection=null,top=null){
+  toggle(enabled,selection=null){
     if(this.composing){this.notify('한글 입력을 마친 뒤 다시 실행해 주세요.');return false;}
     this.enabled=enabled;this.selection=selection;this.lastRestored=null;this.pendingLine=null;
-    this.refresh(top);
+    this.refresh();
     return true;
   }
   finish(){
@@ -97,14 +96,14 @@ export class PreviewEditor{
     }
   }
   // Rebuild only from the canonical rendered screenplay; never serialize arbitrary HTML.
-  decorate(top=null,anchor=null){
+  decorate(anchor=null){
     this.hideBlankCaret();
     this.main.classList.toggle('preview-writing',this.full());this.main.contentEditable=this.full()?'true':'false';
     this.main.setAttribute('aria-label',this.live()?'대본 라이브 프리뷰':this.full()?'대본 직접 편집':'대본 미리보기');
     this.main.setAttribute('role',this.full()?'textbox':'document');this.main.setAttribute('aria-multiline','true');
     this.main.spellcheck=false;
     this.points=[];this.spans=[];this.nodeMaps=new WeakMap();if(!this.enabled)return;
-    this.decorateLive(top,anchor);
+    this.decorateLive(anchor);
   }
   // Empty source lines continue the previous dialogue until a second newline.
   placeSlot(el,pos,ranges){
@@ -123,7 +122,7 @@ export class PreviewEditor{
     return pos;
   }
 
-  decorateLive(top,anchor){
+  decorateLive(anchor){
     const source=this.input.value,snap=this.getSnapshot();this.notes=noteRanges(source);this.liveBlocks=[];
     for(let el of this.main.querySelectorAll('[data-token]')){
       const rec=snap.records.get(el.dataset.token);if(!rec)continue;
@@ -146,7 +145,6 @@ export class PreviewEditor{
     for(const line of source.split('\n')){
       if(!covered.some(b=>pos>=b.rec.rawStart&&pos<b.rec.rawEnd)){
         const el=this.doc.createElement('p');el.className='preview-slot';el.dataset.insertion=pos;
-        if(!line&&source)el.classList.add('preview-gap');
         const rec={rawStart:pos,rawEnd:pos+line.length,sourceStart:pos,sourceEnd:pos+line.length,map:[],formatPairs:[]};
         const note=this.notes.some(([a,b])=>pos>=a&&pos+line.length<=b);
         const block={el,rec,units:new Map(),generated:'',signature:null,hidden:note};
@@ -156,7 +154,7 @@ export class PreviewEditor{
     this.liveBlocks.sort((a,b)=>a.rec.rawStart-b.rec.rawStart);this.updateLive(false);
     if(this.selection){
       this.restoreSelection(false);
-      if(top===null){this.keepBlockAt(anchor);this.revealCaret();}else this.keepCaretAt(top);
+      this.keepBlockAt(anchor);this.revealCaret();
       this.onSelection({...this.selection},this.getSnapshot()?.version);
       this.updateBlankCaret();
     }
@@ -195,7 +193,7 @@ export class PreviewEditor{
         const el=this.doc.createElement('p');el.className='preview-slot';el.dataset.insertion=source.length;el.textContent='​';this.main.append(el);
         this.nodeMaps.set(el.firstChild,[[source.length,source.length]]);this.points.push({node:el.firstChild,offset:0,pos:source.length});
       }
-      if(restore&&this.selection){this.restoreSelection(false);const after=this.caretRect();if(before?.height&&after?.height&&before.top>=0&&before.bottom<=win.innerHeight)win.scrollTo(0,Math.max(0,scroll+after.top-before.top));else this.revealCaret();}
+      if(restore&&this.selection){this.onRelayout();this.restoreSelection(false);const after=this.caretRect();if(before?.height&&after?.height&&before.top>=0&&before.bottom<=win.innerHeight)win.scrollTo(0,Math.max(0,scroll+after.top-before.top));else this.revealCaret();}
     }
     this.updatingLive=false;
   }
@@ -220,8 +218,7 @@ export class PreviewEditor{
     }
     if(!rect?.height||rect.bottom<=0||rect.top>=this.doc.defaultView.innerHeight){this.hideBlankCaret();return;}
     const {left,top,height}=rect;
-    const caretHeight=element?.closest('.preview-gap')?Math.max(10,Math.floor(height*.65)):height;
-    Object.assign(this.blankCaret.style,{left:left+'px',top:top+'px',height:caretHeight+'px'});
+    Object.assign(this.blankCaret.style,{left:left+'px',top:top+'px',height:height+'px'});
     this.blankCaret.hidden=false;
     this.main.classList.add('preview-blank-active');
   }
@@ -245,10 +242,6 @@ export class PreviewEditor{
     if(!block)return;
     const shift=block.el.getBoundingClientRect().top-anchor.top;
     if(Math.abs(shift)>1)this.doc.defaultView.scrollBy(0,shift);
-  }
-  keepCaretAt(top){
-    const rect=this.caretRect();
-    if(rect?.height&&Math.abs(rect.top-top)>1)this.doc.defaultView.scrollBy(0,rect.top-top);
   }
   revealCaret(){const rect=this.caretRect(),win=this.doc.defaultView;if(rect?.height){if(rect.top<12)win.scrollBy(0,rect.top-12);else if(rect.bottom>win.innerHeight-12)win.scrollBy(0,rect.bottom-win.innerHeight+12);}}
   boundary(node,offset){
@@ -286,6 +279,10 @@ export class PreviewEditor{
       else [a,b]=deletionRange(this.input.value,pos,backward);
     }
     const result=replaceVisible(this.input.value,a,b,text,this.live()?[]:pairs,this.hiddenRanges());if(!result){this.notify('숨김 메모는 원본 화면에서 수정해 주세요.');this.refresh();return;}
+    if(a===b&&(type==='insertParagraph'||type==='insertLineBreak')){
+      const cue=this.cueAt(this.input.value,a);
+      if(cue!==null){result.text=result.text.slice(0,cue)+'@'+result.text.slice(cue);result.start++;result.end++;}
+    }
     this.input.setSelectionRange(a,b);this.remember();
     const lineStart=result.text.lastIndexOf('\n',Math.max(0,result.start-1))+1;
     if(text.includes('\n'))this.pendingLine=null;else if(!this.live()&&a===lineStart&&/^[.@>#=~!]/.test(text))this.pendingLine=lineStart;

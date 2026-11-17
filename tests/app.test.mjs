@@ -21,7 +21,10 @@ test('textarea shortcuts, undo, selection and IME compose through actual app lis
     a.input.dispatchEvent(new a.w.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));assert.equal(a.input.value,'한글');
     a.input.dispatchEvent(new a.w.CompositionEvent('compositionstart'));a.edit('민서','insertCompositionText',true);assert.equal(a.input.value,'민서');
     a.input.dispatchEvent(new a.w.CompositionEvent('compositionend'));assert.equal(a.input.value,'민서');
-    a.edit('민서정');assert.equal(a.input.value,'민서정');a.edit('민서\n','insertLineBreak');assert.equal(a.input.value,'@민서\n');assert.equal(a.input.selectionStart,4);
+    a.edit('민서정');assert.equal(a.input.value,'민서정');a.edit('민서');
+    const enter=new a.w.InputEvent('beforeinput',{inputType:'insertLineBreak',bubbles:true,cancelable:true});
+    assert.equal(a.input.dispatchEvent(enter),false);assert.equal(a.input.value,'@민서\n');assert.equal(a.input.selectionStart,4);
+    a.input.dispatchEvent(new a.w.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));assert.equal(a.input.value,'민서');
     await a.flush();assert.deepEqual(a.errors,[]);
   }finally{a.dom.window.close();}
 });
@@ -51,13 +54,13 @@ test('Save button reuses the file; changed text is not falsely marked saved duri
   }finally{a.dom.window.close();}
 });
 
-test('preview character click does not normalize source or add undo history',async()=>{
+test('reading preview click preserves the source caret, text and undo history',async()=>{
   const a=await app();try{
     a.edit('이전 원고','insertFromPaste');a.edit('민서','insertFromPaste');await a.flush();
     const doc=a.q('#preview').contentDocument,p=doc.querySelector('[data-token]');
     const original=doc.createRange.bind(doc);doc.createRange=()=>{const r=original();r.getClientRects=()=>{const end=r.startContainer.nodeType===3?r.endOffset:r.startContainer.textContent.length;return [{left:r.startOffset*10,right:end*10,top:10,bottom:30,width:(end-r.startOffset)*10,height:20}];};r.getBoundingClientRect=()=>r.getClientRects()[0];return r;};
     a.input.focus();for(const type of ['pointerdown','click'])p.dispatchEvent(new a.w.MouseEvent(type,{bubbles:true,button:0,detail:1,clientX:(p.textContent.length-1)*10+2,clientY:20}));
-    assert.equal(a.input.selectionStart,1);assert.equal(a.input.value,'민서');assert.equal(a.w.document.activeElement,a.input);
+    assert.equal(a.input.selectionStart,2);assert.equal(a.input.value,'민서');assert.equal(a.w.document.activeElement,a.input);
     a.input.dispatchEvent(new a.w.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));assert.equal(a.input.value,'이전 원고');assert.deepEqual(a.errors,[]);
   }finally{a.dom.window.close();}
 });

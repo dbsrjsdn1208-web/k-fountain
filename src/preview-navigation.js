@@ -27,11 +27,11 @@ export function mappedPosition(record,hit){
   if(!record||!hit)return null;const span=record.map[hit.index];return span?span[hit.after?1:0]:null;
 }
 
-function* renderedText(doc,element,record){
+function* renderedText(doc,element,record,nodeMaps){
   const walker=doc.createTreeWalker(element,4);
   let offset=0,node;
   while((node=walker.nextNode())){
-    yield {node,map:record.map.slice(offset,offset+node.length)};
+    yield {node,map:nodeMaps?nodeMaps.get(node)||[]:record.map.slice(offset,offset+node.length)};
     offset+=node.length;
   }
 }
@@ -42,12 +42,12 @@ function characterRect(doc,node,index){
   return range.getBoundingClientRect?.();
 }
 
-export function renderedPositionRect(doc,records,pos){
+export function renderedPositionRect(doc,records,pos,nodeMaps){
   let closest=null,distance=Infinity;
   for(const el of doc.querySelectorAll('[data-token]')){
     const record=records.get(el.dataset.token);
     if(!record||pos<record.rawStart||pos>record.rawEnd)continue;
-    for(const {node,map} of renderedText(doc,el,record)){
+    for(const {node,map} of renderedText(doc,el,record,nodeMaps)){
       for(const [i,span] of map.entries()){
         if(!span||span[0]===span[1])continue;
         if(pos===span[0])return characterRect(doc,node,i);
@@ -65,15 +65,21 @@ export function visiblePreviewAnchor(doc,records,selection){
   if(preferred?.height&&preferred.top>=0&&preferred.bottom<=height){
     return {selection,top:preferred.top};
   }
-  let best=null;
+  return previewViewportAnchor(doc,records,0)||{selection,top:null};
+}
+
+export function previewViewportAnchor(doc,records,y,nodeMaps){
+  const height=doc.defaultView.innerHeight;
+  let best=null,distance=Infinity;
   for(const el of doc.querySelectorAll('[data-token]')){
     const block=el.getBoundingClientRect(),record=records.get(el.dataset.token);
     if(!record||!block.height||block.bottom<=0||block.top>=height)continue;
-    for(const {node,map} of renderedText(doc,el,record)){
+    for(const {node,map} of renderedText(doc,el,record,nodeMaps)){
+      if(!map.length)continue;
       let lo=0,hi=map.length-1;
       while(lo<hi){
         const mid=(lo+hi)>>>1;
-        if((characterRect(doc,node,mid)?.bottom??0)<=0)lo=mid+1;else hi=mid;
+        if((characterRect(doc,node,mid)?.bottom??0)<=y)lo=mid+1;else hi=mid;
       }
       for(let i=lo;i<map.length;i++){
         const span=map[i];
@@ -81,12 +87,13 @@ export function visiblePreviewAnchor(doc,records,selection){
         const rect=characterRect(doc,node,i);
         if(!rect?.height||rect.bottom<=0)continue;
         if(rect.top>=height)break;
-        if(!best||rect.top<best.top)best={selection:{anchor:span[0],focus:span[0]},top:rect.top};
+        const d=Math.max(rect.top-y,y-rect.bottom,0);
+        if(d<distance){best={selection:{anchor:span[0],focus:span[0]},top:rect.top};distance=d;}
         break;
       }
     }
   }
-  return best||{selection,top:null};
+  return best;
 }
 
 // A bounded history of exact edits relates an older rendered snapshot to the
@@ -114,23 +121,49 @@ export class SourceEdits{
 
 // Match the actual textarea's wrapping, including scrollbar width and tabs.
 // The mirror stays outside layout and uses the same text wrapping as the source.
-export function revealCaret(input,pos,{center=false}={}){
-  const doc=input.ownerDocument,css=doc.defaultView.getComputedStyle(input),mirror=doc.createElement('div');
+function mirrorStyle(input,mirror){
+  const css=input.ownerDocument.defaultView.getComputedStyle(input);
+  const properties=['fontFamily','fontSize','fontWeight','fontStyle','fontVariant','fontStretch','lineHeight','letterSpacing','wordSpacing','textIndent','textTransform','textAlign','direction','tabSize','paddingTop','paddingBottom','paddingLeft','paddingRight','wordBreak'];
+  const width=input.clientWidth+'px',wrap=input.wrap==='off';
+  return Object.fromEntries([...properties.map(key=>[key,css[key]]),...Object.entries({width,whiteSpace:wrap?'pre':'pre-wrap',overflowWrap:wrap?'normal':'break-word',position:'fixed',left:'-100000px',top:'0',visibility:'hidden',pointerEvents:'none',boxSizing:'border-box',border:'0',margin:'0'})]);
+}
+
+export function createSourceMeasure(input){
+  const doc=input.ownerDocument,mirror=doc.createElement('div'),node=doc.createTextNode(''),range=doc.createRange();
   mirror.setAttribute('aria-hidden','true');
-  for(const property of ['fontFamily','fontSize','fontWeight','fontStyle','fontVariant','fontStretch','lineHeight','letterSpacing','wordSpacing','textIndent','textTransform','textAlign','direction','tabSize','paddingTop','paddingBottom','paddingLeft','paddingRight','overflowWrap','wordBreak'])mirror.style[property]=css[property];
-  Object.assign(mirror.style,{position:'fixed',left:'-100000px',top:'0',visibility:'hidden',pointerEvents:'none',boxSizing:'border-box',width:input.clientWidth+'px',whiteSpace:input.wrap==='off'?'pre':'pre-wrap',overflowWrap:input.wrap==='off'?'normal':'break-word',border:'0',margin:'0'});
-  const before=doc.createTextNode(input.value.slice(0,pos)),marker=doc.createElement('span');
-  // Keep following text: it controls word wrapping at the insertion point.
+  Object.assign(mirror.style,mirrorStyle(input));
+  mirror.append(node);doc.body.append(mirror);
+  let text=null,geometry='';
+  return {
+    prepare(){
+      const style=mirrorStyle(input),key=JSON.stringify(style);
+      if(key!==geometry){Object.assign(mirror.style,style);geometry=key;}
+      if(text!==input.value){text=input.value;node.data=text+'\u200b';}
+    },
+    rect(pos){
+      range.setStart(node,pos);range.setEnd(node,pos+1);
+      const base=mirror.getBoundingClientRect(),rect=range.getBoundingClientRect();
+      return {top:rect.top-base.top,bottom:rect.bottom-base.top,left:rect.left-base.left,right:rect.right-base.left};
+    },
+    destroy:()=>mirror.remove(),
+  };
+}
+
+export function revealCaret(input,pos,{center=false}={}){
+  const doc=input.ownerDocument,mirror=doc.createElement('div'),marker=doc.createElement('span');
+  mirror.setAttribute('aria-hidden','true');
+  Object.assign(mirror.style,mirrorStyle(input));
   const next=segmenter.segment(input.value.slice(pos))[Symbol.iterator]().next().value?.segment||'';
   marker.textContent=next||'\u200b';
-  mirror.append(before,marker,doc.createTextNode(input.value.slice(pos+next.length)));doc.body.append(mirror);
+  mirror.append(input.value.slice(0,pos),marker,input.value.slice(pos+next.length));doc.body.append(mirror);
   try{
-    const base=mirror.getBoundingClientRect(),rect=marker.getBoundingClientRect(),top=rect.top-base.top,bottom=rect.bottom-base.top;
+    const base=mirror.getBoundingClientRect(),rect=marker.getBoundingClientRect();
+    const top=rect.top-base.top,bottom=rect.bottom-base.top,left=rect.left-base.left,right=rect.right-base.left;
     const margin=Math.min(24,input.clientHeight/4),viewTop=input.scrollTop,viewBottom=viewTop+input.clientHeight;
     if(center)input.scrollTop=Math.max(0,(top+bottom-input.clientHeight)/2);
     else if(top<viewTop)input.scrollTop=Math.max(0,top-margin);
     else if(bottom>viewBottom)input.scrollTop=Math.max(0,bottom-input.clientHeight+margin);
-    if(input.wrap==='off'){const left=rect.left-base.left,right=rect.right-base.left;if(left<input.scrollLeft+margin)input.scrollLeft=Math.max(0,left-margin);else if(right>input.scrollLeft+input.clientWidth-margin)input.scrollLeft=right-input.clientWidth+margin;}
+    if(input.wrap==='off'){if(left<input.scrollLeft+margin)input.scrollLeft=Math.max(0,left-margin);else if(right>input.scrollLeft+input.clientWidth-margin)input.scrollLeft=right-input.clientWidth+margin;}
   }finally{mirror.remove();}
 }
 

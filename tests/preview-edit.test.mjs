@@ -4,14 +4,14 @@ import {JSDOM} from 'jsdom';
 import {PreviewEditor,replaceVisible,deletionRange} from '../src/preview-editor.js';
 import {SourceEdits} from '../src/preview-navigation.js';
 import {parseScreenplay,renderPreview,exportReadableText} from '../src/screenplay.js';
-import {normalizeText} from '../src/text-tools.js';
+import {characterCueOnEnter} from '../src/text-tools.js';
 import {docxBuffer} from '../src/exports.js';
 import {unzipSync,strFromU8} from 'fflate';
 function app(text,mode='full',options={}){
   const dom=new JSDOM('<textarea></textarea><main></main>',{pretendToBeVisual:true}),doc=dom.window.document,input=doc.querySelector('textarea'),main=doc.querySelector('main');input.value=text;
   const edits=new SourceEdits(text);let snapshot,editor,model,history=[text],idx=0;const notices=[];
   const render=()=>{if(editor?.busy())return;model=parseScreenplay(input.value,['민서','도윤']);main.innerHTML=renderPreview(model,{showNotes:options.showNotes});snapshot={version:edits.version,records:model.navigation};editor?.decorate();};
-  editor=new PreviewEditor({doc,input,edits,getSnapshot:()=>snapshot,getMode:()=>mode,getShowNotes:()=>options.showNotes===true,onSelection:(...args)=>options.onSelection?.(...args),notify:x=>notices.push(x),save:()=>{},remember:()=>{},undo:d=>{if(history[idx+d]!==undefined){input.value=history[idx+=d];edits.record(input.value);}},apply:(value,start,end,type,auto)=>{input.value=auto?normalizeText(value,['민서','도윤'],{}):value;input.setSelectionRange(start,end);edits.record(input.value);history=history.slice(0,idx+1);history.push(input.value);idx++;},refresh:render});render();editor.toggle(true);
+  editor=new PreviewEditor({doc,input,edits,getSnapshot:()=>snapshot,getMode:()=>mode,getShowNotes:()=>options.showNotes===true,onSelection:(...args)=>options.onSelection?.(...args),cueAt:(text,pos)=>characterCueOnEnter(text,pos,['민서','도윤']),notify:x=>notices.push(x),save:()=>{},remember:()=>{},undo:d=>{if(history[idx+d]!==undefined){input.value=history[idx+=d];edits.record(input.value);}},apply:(value,start,end)=>{input.value=value;input.setSelectionRange(start,end);edits.record(input.value);history=history.slice(0,idx+1);history.push(input.value);idx++;},refresh:render});render();editor.toggle(true);
   const select=(a,b=a)=>{editor.selection={anchor:a,focus:b};if(editor.live())editor.updateLive(false);editor.restoreSelection();};
   const type=(data,inputType='insertText')=>main.dispatchEvent(new dom.window.InputEvent('beforeinput',{bubbles:true,cancelable:true,inputType,data}));
   return {dom,doc,input,main,editor,edits,notices,select,type,render,get model(){return model;},close:()=>dom.window.close()};
@@ -49,11 +49,17 @@ test('a visible blank line gets a non-printing caret that vanishes after typing'
   const caret=a.doc.querySelector('#preview-blank-caret');
   assert.equal(caret.hidden,false);
   assert.equal(caret.getAttribute('aria-hidden'),'true');
+  assert.equal(caret.style.height,'23px');
   assert.equal(a.main.classList.contains('preview-blank-active'),true);
   a.type('입력');
   assert.equal(a.input.value,'첫 줄\n입력\n다음 문단');
   assert.equal(caret.hidden,true);
   a.close();
+});
+for(const mode of ['source','full'])test(`${mode}: registered cue is inserted only on Enter and undone in one edit`,()=>{
+  const a=app('',mode);a.select(0);a.type('민서 (전화) ^');assert.equal(a.input.value,'민서 (전화) ^');
+  a.type(null,'insertParagraph');assert.equal(a.input.value,'@민서 (전화) ^\n');
+  a.editor.history(-1);assert.equal(a.input.value,'민서 (전화) ^');a.close();
 });
 test('composition does not render over IME; commits one final edit',()=>{
   const a=app('처음');a.select(2);const initial=a.main.firstChild;a.main.dispatchEvent(new a.dom.window.CompositionEvent('compositionstart',{bubbles:true}));a.type('ㅎ','insertCompositionText');assert.equal(a.input.value,'처음');a.render();assert.equal(a.main.firstChild,initial);a.main.dispatchEvent(new a.dom.window.CompositionEvent('compositionend',{bubbles:true,data:'한글'}));assert.equal(a.input.value,'처음한글');a.editor.history(-1);assert.equal(a.input.value,'처음');a.close();
