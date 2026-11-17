@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {parse} from '../src/engine/fountain_parser.js';
 import {parseScreenplay,renderPreview} from '../src/screenplay.js';
-import {SourceEdits,mappedPosition,hitText,revealCaret,installPreviewNavigation,visiblePreviewAnchor} from '../src/preview-navigation.js';
+import {SourceEdits,mappedPosition,hitText,revealCaret,installPreviewNavigation,installSourceNavigation,visiblePreviewAnchor} from '../src/preview-navigation.js';
 
 function preview(source,names=[]){const elements=parseScreenplay(source,names);const dom=new JSDOM(renderPreview(elements));return {elements,dom,doc:dom.window.document};}
 function verifyMap(source,names=[]){
@@ -112,4 +112,16 @@ test('only a Ctrl-click on a glyph moves the source caret, including after an em
   for(const type of ['pointerdown','click'])g.event(type,28,20);
   assert.equal(g.navigated,1);assert.equal(g.input.selectionStart,3);
   assert.equal(g.doc.activeElement,g.input);assert.equal(g.input.value,'가😊나');g.dom.window.close();
+});
+
+test('source Ctrl-click navigates from the native caret without treating selection or drag as navigation',()=>{
+  const dom=new JSDOM('<textarea>가😊나</textarea>'),w=dom.window,input=w.document.querySelector('textarea'),positions=[];
+  installSourceNavigation({input,onNavigate:pos=>positions.push(pos)});
+  const gesture=(ctrlKey,end=12)=>{
+    input.dispatchEvent(new w.MouseEvent('pointerdown',{button:0,ctrlKey,clientX:12}));
+    input.dispatchEvent(new w.MouseEvent('click',{button:0,ctrlKey,clientX:end,detail:1}));
+  };
+  input.setSelectionRange(1,3);gesture(true);
+  input.setSelectionRange(3,3);gesture(false);gesture(true,30);gesture(true);
+  assert.deepEqual(positions,[3]);assert.equal(input.value,'가😊나');dom.window.close();
 });

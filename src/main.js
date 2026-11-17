@@ -4,7 +4,7 @@ import './style.css';
 import {DEFAULT_SETTINGS,escapeHTML as esc,parseScreenplay,renderPreview,previewCSS,exportReadableText} from './screenplay.js';
 import {characterCueOnEnter,cleanNames,normalizeText,normalizeNewlines,mapSelection,toggleMarkup,clipboardFountain,migrateLegacy} from './text-tools.js';
 import {FileSession,handleDB} from './file-store.js';
-import {SourceEdits,installPreviewNavigation,revealCaret,visiblePreviewAnchor,previewViewportAnchor,renderedPositionRect} from './preview-navigation.js';
+import {SourceEdits,installPreviewNavigation,installSourceNavigation,revealCaret,visiblePreviewAnchor,previewViewportAnchor,renderedPositionRect} from './preview-navigation.js';
 import {PreviewEditor,editorCSS} from './preview-editor.js';
 import {installViewControls} from './view-controls.js';
 import {installSceneOutline,installToolbarMenus} from './workspace-ui.js';
@@ -291,6 +291,20 @@ installPreviewNavigation({doc:previewDoc,input,getSnapshot:()=>navigationSnapsho
     if(input.hidden)viewControls.selectLayout('split');
     sceneOutline.locate(pos);
   }});
+installSourceNavigation({input,isComposing:()=>composing||previewEditor.busy(),onNavigate:pos=>{
+  if(previewEditor.hiddenRanges().some(([from,to])=>from<=pos&&pos<to))return false;
+  if(frame.parentElement.hidden)viewControls.selectLayout('split');
+  renderNow();
+  const maps=previewEditor.enabled?previewEditor.nodeMaps:null;
+  const target=renderedPositionRect(previewDoc,navigationSnapshot.records,pos,maps);
+  if(!target?.height)return false;
+  if(previewEditor.enabled)focusPreviewAtSource();
+  else{
+    const win=frame.contentWindow;
+    win.scrollBy(0,target.top-(win.innerHeight-target.height)/2);
+  }
+  return true;
+}});
 input.addEventListener('beforeinput',event=>{
   if(event.inputType==='historyUndo'||event.inputType==='historyRedo'){event.preventDefault();restoreHistory(event.inputType==='historyUndo'?-1:1);return;}
   if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();

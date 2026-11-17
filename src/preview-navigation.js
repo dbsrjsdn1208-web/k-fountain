@@ -147,26 +147,43 @@ export function revealCaret(input,pos,{center=false}={}){
   }finally{mirror.remove();}
 }
 
-export function installPreviewNavigation({doc,input,getSnapshot,edits,onNavigate,isComposing=()=>false,getNodeMaps=()=>null}){
+function installCtrlClick(target,{isComposing,readOrigin,navigate}){
   let down=null;
-  doc.addEventListener('pointerdown',event=>{
+  target.addEventListener('pointerdown',event=>{
     down=null;if(!event.ctrlKey||event.button!==0||isComposing())return;
-    const element=event.target.closest?.('[data-token]');if(!element)return;
+    const origin=readOrigin(event);
+    if(origin!==null)down={x:event.clientX,y:event.clientY,origin};
+  });
+  target.addEventListener('pointercancel',()=>down=null);
+  target.addEventListener('click',event=>{
+    const start=down;down=null;
+    if(!start||!event.ctrlKey||event.button!==0||event.detail>1||isComposing()||Math.hypot(event.clientX-start.x,event.clientY-start.y)>3)return;
+    if(navigate(start.origin))event.preventDefault();
+  });
+}
+
+export function installSourceNavigation({input,onNavigate,isComposing=()=>false}){
+  installCtrlClick(input,{isComposing,readOrigin:()=>true,
+    navigate:()=>input.selectionStart===input.selectionEnd&&onNavigate(input.selectionEnd)});
+}
+
+export function installPreviewNavigation({doc,input,getSnapshot,edits,onNavigate,isComposing=()=>false,getNodeMaps=()=>null}){
+  function readOrigin(event){
+    const element=event.target.closest?.('[data-token]');if(!element)return null;
     const snapshot=getSnapshot(),record=snapshot?.records.get(element.dataset.token);
     const hit=record&&hitText(element,event.clientX,event.clientY);
-    if(!hit)return;
+    if(!hit)return null;
     const nodeMaps=getNodeMaps();
     let pos;
     if(!nodeMaps)pos=mappedPosition(record,hit);
     else if(hit.node.parentElement.closest('.preview-number'))pos=record.sourceStart;
     else pos=nodeMaps.get(hit.node)?.[hit.textIndex]?.[hit.after?1:0]??null;
-    if(pos!==null)down={x:event.clientX,y:event.clientY,pos,version:snapshot.version};
-  });
-  doc.addEventListener('pointercancel',()=>down=null);
-  doc.addEventListener('click',event=>{
-    const start=down;down=null;
-    if(!start||!event.ctrlKey||event.button!==0||event.detail>1||isComposing()||Math.hypot(event.clientX-start.x,event.clientY-start.y)>3||!doc.getSelection()?.isCollapsed)return;
-    const pos=edits.map(start.pos,start.version);if(pos===null)return;
-    event.preventDefault();onNavigate(pos);input.focus({preventScroll:true});input.setSelectionRange(pos,pos);revealCaret(input,pos);
-  });
+    return pos===null?null:{pos,version:snapshot.version};
+  }
+  installCtrlClick(doc,{isComposing,readOrigin,navigate(origin){
+    if(!doc.getSelection()?.isCollapsed)return false;
+    const pos=edits.map(origin.pos,origin.version);if(pos===null)return false;
+    onNavigate(pos);input.focus({preventScroll:true});input.setSelectionRange(pos,pos);revealCaret(input,pos);
+    return true;
+  }});
 }
