@@ -4,7 +4,7 @@ import './style.css';
 import {DEFAULT_SETTINGS,escapeHTML as esc,parseScreenplay,renderPreview,previewCSS,exportReadableText} from './screenplay.js';
 import {cleanNames,normalizeText,normalizeNewlines,mapSelection,toggleMarkup,clipboardFountain,migrateLegacy} from './text-tools.js';
 import {FileSession,handleDB} from './file-store.js';
-import {SourceEdits,installPreviewNavigation,revealCaret} from './preview-navigation.js';
+import {SourceEdits,installPreviewNavigation,revealCaret,visiblePreviewAnchor,renderedPositionRect} from './preview-navigation.js';
 import {PreviewEditor,editorCSS} from './preview-editor.js';
 import {installViewControls} from './view-controls.js';
 import {installSceneOutline,installToolbarMenus} from './workspace-ui.js';
@@ -137,16 +137,17 @@ const previewDoc=frame.contentDocument;
 previewDoc.open();previewDoc.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>K-파운틴</title><style id="fonts"></style><style id="style"></style></head><body><main tabindex="-1"></main></body></html>');previewDoc.close();
 const faces=[...document.styleSheets].flatMap(s=>{try{return [...s.cssRules].filter(r=>r.type===5).map(r=>r.cssText);}catch{return [];}}).join('\n');
 previewDoc.querySelector('#fonts').textContent=faces;
-function renderNow(){
+function renderNow(openingTop=null){
   if(previewEditor?.busy())return;
   const key=JSON.stringify([state.names,state.settings]);
   if(input.value!==previewText||key!==previewKey){
+    const anchor=openingTop===null&&document.activeElement===frame?previewEditor?.captureBlockAnchor():null;
     elements=parseScreenplay(input.value,state.names,state.settings);
     const scroll=frame.contentWindow.scrollY,html=renderPreview(elements,{showNotes:state.settings.showNotes}),main=previewDoc.querySelector('main');
     if(main.innerHTML!==html)main.innerHTML=html;
     navigationSnapshot={records:elements.navigation,version:sourceEdits.version};
     if(key!==previewKey){previewDoc.querySelector('#style').textContent=previewCSS(state.settings)+editorCSS;input.style.fontFamily=`${JSON.stringify(state.settings.font)},"Noto Serif KR",serif`;}
-    frame.contentWindow.scrollTo(0,scroll);previewEditor?.decorate();previewText=input.value;previewKey=key;
+    frame.contentWindow.scrollTo(0,scroll);previewEditor?.decorate(openingTop,anchor);previewText=input.value;previewKey=key;
     outlineVersion=sourceEdits.version;
     const entries=elements.model.tokens.filter(token=>token.type==='scene_heading').map(token=>({
       pos:token.rawStart, title:elements[token.sourceLine]?.displayText||token.text,
@@ -200,9 +201,12 @@ function restoreWorkFocus(){
     previewDoc.querySelector('main').focus({preventScroll:true});
   }else if(!input.hidden)input.focus({preventScroll:true});
 }
-function focusPreviewAtSource(){
+function sourceSelection(){
   const {selectionStart:start,selectionEnd:end,selectionDirection}=input;
-  previewEditor.selection=selectionDirection==='backward'?{anchor:end,focus:start}:{anchor:start,focus:end};
+  return selectionDirection==='backward'?{anchor:end,focus:start}:{anchor:start,focus:end};
+}
+function focusPreviewAtSource(){
+  previewEditor.selection=sourceSelection();
   previewEditor.updateLive(false);
   previewEditor.restoreSelection();
 }
@@ -235,7 +239,7 @@ function layoutChanged(){
 previewEditor=new PreviewEditor({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,getMode:()=>state.settings.previewEditMode||'source',getShowNotes:()=>state.settings.showNotes===true,onSelection:previewSelection,
   apply:(text,start,end,type,auto)=>{suppressFollow=true;input.value=text;input.setSelectionRange(start,end);if(auto)normalize(true);record(type);changed();},
   remember:()=>{if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();},undo:restoreHistory,
-  refresh:()=>{previewText=null;renderNow();},notify:toast,save:saveFile});
+  refresh:top=>{previewText=null;renderNow(top);},notify:toast,save:saveFile});
 function jumpToScene(scene){
   const pos=sourceEdits.map(scene.pos,outlineVersion);
   if(pos===null){renderNow();return;}
@@ -254,15 +258,28 @@ function jumpToScene(scene){
   sceneOutline.locate(pos);
 }
 $('#preview-edit').onclick=()=>{
-  if(composing)return;
-  if(!previewEditor.toggle(!previewEditor.enabled))return;
+  if(composing||previewEditor.busy()){toast('한글 입력을 마친 뒤 화면을 바꿔 주세요.');return;}
+  suppressFollow=true;
+  renderNow();
+  lastEditTime=0;
   if(previewEditor.enabled){
-    if(frame.parentElement.hidden)viewControls.selectLayout('split');
-    focusPreviewAtSource();
-  }else restoreWorkFocus();
+    const selection=previewEditor.readSelection();
+    const caret=previewEditor.caretRect();
+    previewEditor.toggle(false);
+    if(selection&&caret?.height&&caret.top>=0&&caret.bottom<=frame.contentWindow.innerHeight){
+      const next=renderedPositionRect(previewDoc,navigationSnapshot.records,selection.focus);
+      if(next?.height)frame.contentWindow.scrollBy(0,next.top-caret.top);
+    }
+    restoreWorkFocus();
+  }else{
+    const hidden=frame.parentElement.hidden;
+    const selection=sourceSelection();
+    const anchor=hidden?{selection,top:null}:visiblePreviewAnchor(previewDoc,navigationSnapshot.records,selection);
+    if(hidden)viewControls.selectLayout('split');
+    previewEditor.toggle(true,anchor.selection,anchor.top);
+  }
   $('#preview-edit').setAttribute('aria-pressed',String(previewEditor.enabled));
 };
-document.addEventListener('pointerdown',()=>previewEditor.clearSelection());
 input.addEventListener('focus',()=>{lastPane='source';previewEditor.clearSelection();queueTypewriter();});
 installPreviewNavigation({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,isComposing:()=>composing||previewEditor.enabled||input.hidden,onNavigate:()=>{suppressFollow=true;}});
 input.addEventListener('beforeinput',event=>{

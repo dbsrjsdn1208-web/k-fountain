@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {parse} from '../src/engine/fountain_parser.js';
 import {parseScreenplay,renderPreview} from '../src/screenplay.js';
-import {SourceEdits,mappedPosition,hitText,revealCaret,installPreviewNavigation} from '../src/preview-navigation.js';
+import {SourceEdits,mappedPosition,hitText,revealCaret,installPreviewNavigation,visiblePreviewAnchor} from '../src/preview-navigation.js';
 
 function preview(source,names=[]){const elements=parseScreenplay(source,names);const dom=new JSDOM(renderPreview(elements));return {elements,dom,doc:dom.window.document};}
 function verifyMap(source,names=[]){
@@ -52,6 +52,22 @@ test('stale preview maps positions through edits and rejects replaced content',(
 });
 test('unmappable characters never produce a guessed destination',()=>{
   assert.equal(mappedPosition({map:[null]},{index:0,after:false}),null);assert.equal(mappedPosition(null,{index:0,after:false}),null);
+});
+test('activating preview editing anchors to the visible paragraph when the original caret is offscreen',()=>{
+  const source='반복 대사\n\n반복 대사';
+  const p=preview(source),rows=[...p.doc.querySelectorAll('.action')];
+  const bounds=[{top:-50,bottom:-30,height:20},{top:12,bottom:32,height:20}];
+  rows.forEach((row,i)=>{row.getBoundingClientRect=()=>bounds[i];});
+  const create=p.doc.createRange.bind(p.doc);
+  p.doc.createRange=()=>{
+    const range=create();
+    range.getBoundingClientRect=()=>range.startContainer.parentElement.getBoundingClientRect();
+    return range;
+  };
+  const second=source.lastIndexOf('반복');
+  assert.deepEqual(visiblePreviewAnchor(p.doc,p.elements.navigation,{anchor:0,focus:0}),{selection:{anchor:second,focus:second},top:12});
+  assert.deepEqual(visiblePreviewAnchor(p.doc,p.elements.navigation,{anchor:second+2,focus:second+1}),{selection:{anchor:second+2,focus:second+1},top:12});
+  p.dom.window.close();
 });
 
 test('replacing a document invalidates old snapshots, including after more edits',()=>{

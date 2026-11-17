@@ -27,6 +27,68 @@ export function mappedPosition(record,hit){
   if(!record||!hit)return null;const span=record.map[hit.index];return span?span[hit.after?1:0]:null;
 }
 
+function* renderedText(doc,element,record){
+  const walker=doc.createTreeWalker(element,4);
+  let offset=0,node;
+  while((node=walker.nextNode())){
+    yield {node,map:record.map.slice(offset,offset+node.length)};
+    offset+=node.length;
+  }
+}
+
+function characterRect(doc,node,index){
+  const range=doc.createRange();
+  range.setStart(node,index);range.setEnd(node,index+1);
+  return range.getBoundingClientRect?.();
+}
+
+export function renderedPositionRect(doc,records,pos){
+  let closest=null,distance=Infinity;
+  for(const el of doc.querySelectorAll('[data-token]')){
+    const record=records.get(el.dataset.token);
+    if(!record||pos<record.rawStart||pos>record.rawEnd)continue;
+    for(const {node,map} of renderedText(doc,el,record)){
+      for(const [i,span] of map.entries()){
+        if(!span||span[0]===span[1])continue;
+        if(pos===span[0])return characterRect(doc,node,i);
+        const d=Math.min(Math.abs(span[0]-pos),Math.abs(span[1]-pos));
+        if(d<distance){closest={node,i};distance=d;}
+      }
+    }
+  }
+  return closest?characterRect(doc,closest.node,closest.i):null;
+}
+
+export function visiblePreviewAnchor(doc,records,selection){
+  const height=doc.defaultView.innerHeight;
+  const preferred=renderedPositionRect(doc,records,selection.focus);
+  if(preferred?.height&&preferred.top>=0&&preferred.bottom<=height){
+    return {selection,top:preferred.top};
+  }
+  let best=null;
+  for(const el of doc.querySelectorAll('[data-token]')){
+    const block=el.getBoundingClientRect(),record=records.get(el.dataset.token);
+    if(!record||!block.height||block.bottom<=0||block.top>=height)continue;
+    for(const {node,map} of renderedText(doc,el,record)){
+      let lo=0,hi=map.length-1;
+      while(lo<hi){
+        const mid=(lo+hi)>>>1;
+        if((characterRect(doc,node,mid)?.bottom??0)<=0)lo=mid+1;else hi=mid;
+      }
+      for(let i=lo;i<map.length;i++){
+        const span=map[i];
+        if(!span||span[0]===span[1])continue;
+        const rect=characterRect(doc,node,i);
+        if(!rect?.height||rect.bottom<=0)continue;
+        if(rect.top>=height)break;
+        if(!best||rect.top<best.top)best={selection:{anchor:span[0],focus:span[0]},top:rect.top};
+        break;
+      }
+    }
+  }
+  return best||{selection,top:null};
+}
+
 // A bounded history of exact edits relates an older rendered snapshot to the
 // current textarea. A deleted/replaced hit has no safe destination.
 export class SourceEdits{

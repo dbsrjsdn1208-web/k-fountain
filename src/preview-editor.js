@@ -27,17 +27,20 @@ export function deletionRange(text,pos,backward){
 }
 
 export const editorCSS=`
-main.preview-writing{outline:none;caret-color:currentColor;min-height:70vh;}
+main.preview-writing{outline:none;caret-color:currentColor;}
 .preview-raw{display:block;box-sizing:border-box;width:100%;min-height:3em;resize:none;font:inherit;line-height:1.5;white-space:pre-wrap;border:1px solid #3594cf;border-radius:3px;padding:8px;color:inherit;background:transparent;caret-color:currentColor;}
 .preview-slot{min-height:1.5em;white-space:pre-wrap;margin:0;}
+.preview-slot.preview-gap{height:0;min-height:0;position:relative;line-height:0;}
+.preview-gap>span{position:absolute;inset-inline-start:0;top:0;line-height:var(--default-line-height,1.5);}
 .preview-number{user-select:none;}
 .preview-syntax{color:#77818d;}
 .preview-note{color:#77818d;font-weight:400;font-style:normal;text-decoration:none;white-space:pre-wrap;}
 .preview-hidden-slot{min-height:0;height:0;line-height:0;overflow:hidden;}
-.preview-page-break{min-height:1.5em;border-top:1px dashed #ccd1d6;}
+.preview-page-break{height:0;position:relative;}
+.preview-page-break::before{content:'';position:absolute;inset-inline:0;top:0;border-top:1px dashed #ccd1d6;pointer-events:none;}
+.preview-page-break>span{position:absolute;inset-inline-start:0;top:0;}
 .preview-writing [data-token]{white-space:pre-wrap;}
 .preview-writing:empty:before{content:'여기에 Fountain으로 작성하세요';opacity:.45;}
-@media screen{.preview-writing .action,.preview-writing .screen-heading,.preview-writing .transition{margin-top:0;margin-bottom:0;}.preview-writing .character{margin-top:0;}}
 @media print{.preview-slot,.preview-raw,.preview-syntax,.preview-note{display:none!important;}.preview-page-break{break-after:page;visibility:hidden;}[data-raw-hidden]{display:revert!important;}}
 `;
 
@@ -63,7 +66,12 @@ export class PreviewEditor{
   full(){return this.enabled;}
   live(){return this.enabled&&this.getMode()!=='full';}
   busy(){return this.composing;}
-  toggle(enabled){if(!this.finish())return false;this.enabled=enabled;this.selection=null;this.pendingLine=null;this.refresh();return true;}
+  toggle(enabled,selection=null,top=null){
+    if(this.composing){this.notify('한글 입력을 마친 뒤 다시 실행해 주세요.');return false;}
+    this.enabled=enabled;this.selection=selection;this.lastRestored=null;this.pendingLine=null;
+    this.refresh(top);
+    return true;
+  }
   finish(){
     if(this.composing){this.notify('한글 입력을 마친 뒤 다시 실행해 주세요.');return false;}
     this.selection=null;this.pendingLine=null;this.refresh();return true;
@@ -78,13 +86,13 @@ export class PreviewEditor{
     }
   }
   // Rebuild only from the canonical rendered screenplay; never serialize arbitrary HTML.
-  decorate(){
+  decorate(top=null,anchor=null){
     this.main.classList.toggle('preview-writing',this.full());this.main.contentEditable=this.full()?'true':'false';
     this.main.setAttribute('aria-label',this.live()?'대본 라이브 프리뷰':this.full()?'대본 직접 편집':'대본 미리보기');
     this.main.setAttribute('role',this.full()?'textbox':'document');this.main.setAttribute('aria-multiline','true');
     this.main.spellcheck=false;
     this.points=[];this.spans=[];this.nodeMaps=new WeakMap();if(!this.enabled)return;
-    this.decorateLive();
+    this.decorateLive(top,anchor);
   }
   // Empty source lines continue the previous dialogue until a second newline.
   placeSlot(el,pos,ranges){
@@ -103,11 +111,21 @@ export class PreviewEditor{
     return pos;
   }
 
-  decorateLive(){
+  decorateLive(top,anchor){
     const source=this.input.value,snap=this.getSnapshot();this.notes=noteRanges(source);this.liveBlocks=[];
     for(let el of this.main.querySelectorAll('[data-token]')){
       const rec=snap.records.get(el.dataset.token);if(!rec)continue;
-      if(el.matches('hr,br')){const replacement=this.doc.createElement('p');for(const a of el.attributes)replacement.setAttribute(a.name,a.value);if(el.tagName==='HR')replacement.classList.add('preview-page-break');el.replaceWith(replacement);el=replacement;}
+      if(el.matches('hr,br')){
+        const replacement=this.doc.createElement('p');
+        for(const a of el.attributes)replacement.setAttribute(a.name,a.value);
+        if(el.tagName==='HR'){
+          const style=this.doc.defaultView.getComputedStyle(el);
+          replacement.classList.add('preview-page-break');
+          replacement.style.marginBlockStart=style.marginTop;
+          replacement.style.marginBlockEnd=style.marginBottom;
+        }else replacement.classList.add('preview-slot');
+        el.replaceWith(replacement);el=replacement;
+      }
       const block=captureBlock(this.doc,el,rec);
       block.hidden=this.notes.some(([a,b])=>rec.rawStart>=a&&rec.rawEnd<=b);
       this.liveBlocks.push(block);
@@ -116,6 +134,7 @@ export class PreviewEditor{
     for(const line of source.split('\n')){
       if(!covered.some(b=>pos>=b.rec.rawStart&&pos<b.rec.rawEnd)){
         const el=this.doc.createElement('p');el.className='preview-slot';el.dataset.insertion=pos;
+        if(!line&&source)el.classList.add('preview-gap');
         const rec={rawStart:pos,rawEnd:pos+line.length,sourceStart:pos,sourceEnd:pos+line.length,map:[],formatPairs:[]};
         const note=this.notes.some(([a,b])=>pos>=a&&pos+line.length<=b);
         const block={el,rec,units:new Map(),generated:'',signature:null,hidden:note};
@@ -123,7 +142,11 @@ export class PreviewEditor{
       }pos+=line.length+1;
     }
     this.liveBlocks.sort((a,b)=>a.rec.rawStart-b.rec.rawStart);this.updateLive(false);
-    if(this.selection)this.restoreSelection();
+    if(this.selection){
+      this.restoreSelection(false);
+      if(top===null){this.keepBlockAt(anchor);this.revealCaret();}else this.keepCaretAt(top);
+      this.onSelection({...this.selection},this.getSnapshot()?.version);
+    }
   }
   syncSelection(){
     if(!this.full()||this.composing||this.updatingLive)return;const s=this.readSelection();if(!s)return;this.selection=s;
@@ -163,6 +186,31 @@ export class PreviewEditor{
     this.updatingLive=false;
   }
   caretRect(){const s=this.doc.getSelection();if(!s?.focusNode||!this.main.contains(s.focusNode))return null;const range=this.doc.createRange();range.setStart(s.focusNode,s.focusOffset);range.collapse(true);return range.getBoundingClientRect?.();}
+  captureBlockAnchor(){
+    if(!this.enabled)return null;
+    const focus=this.doc.getSelection()?.focusNode;
+    const element=focus?.nodeType===1?focus:focus?.parentElement;
+    const block=element?.closest('[data-token],[data-insertion]');
+    if(!block)return null;
+    const snapshot=this.getSnapshot();
+    if(!snapshot)return null;
+    const {records,version}=snapshot;
+    const source=block.dataset.insertion!==undefined?Number(block.dataset.insertion):records.get(block.dataset.token)?.rawStart;
+    const pos=this.edits.map(source,version);
+    return pos===null?null:{pos,top:block.getBoundingClientRect().top};
+  }
+  keepBlockAt(anchor){
+    if(!anchor)return;
+    const block=this.liveBlocks.find(b=>b.rec.rawStart===anchor.pos)||
+      this.liveBlocks.find(b=>b.rec.rawStart<anchor.pos&&anchor.pos<=b.rec.rawEnd);
+    if(!block)return;
+    const shift=block.el.getBoundingClientRect().top-anchor.top;
+    if(Math.abs(shift)>1)this.doc.defaultView.scrollBy(0,shift);
+  }
+  keepCaretAt(top){
+    const rect=this.caretRect();
+    if(rect?.height&&Math.abs(rect.top-top)>1)this.doc.defaultView.scrollBy(0,rect.top-top);
+  }
   revealCaret(){const rect=this.caretRect(),win=this.doc.defaultView;if(rect?.height){if(rect.top<12)win.scrollBy(0,rect.top-12);else if(rect.bottom>win.innerHeight-12)win.scrollBy(0,rect.bottom-win.innerHeight+12);}}
   boundary(node,offset){
     if(!node||!this.main.contains(node))return null;
