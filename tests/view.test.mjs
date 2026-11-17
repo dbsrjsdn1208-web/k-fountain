@@ -6,7 +6,7 @@ import {printHTML} from '../src/print-document.js';
 import {parseScreenplay,renderPreview,exportReadableText} from '../src/screenplay.js';
 
 function viewApp(){
-  const dom=new JSDOM('<div id="view-menu"><button data-layout="source"></button><button data-layout="split"></button><button data-layout="preview"></button><input id="source-size"><button id="view-reset"></button></div><div id="main-app"><textarea id="fountain-editor"></textarea><div id="pane-divider"></div><section><iframe></iframe></section></div>',{url:'https://example.test'});
+  const dom=new JSDOM('<div id="view-menu"><input id="source-size"><button id="view-reset"></button></div><div id="main-app"><textarea id="fountain-editor"></textarea><div id="pane-divider"></div><section><iframe></iframe></section></div>',{url:'https://example.test'});
   const w=dom.window,doc=w.document,q=s=>doc.querySelector(s),input=q('textarea'),frame=q('iframe'),media={matches:false,addEventListener(_,fn){this.update=fn;}};
   w.matchMedia=()=>media;let busy=false,layouts=0;
   const controller=installViewControls({doc,input,frame,isBusy:()=>busy,onLayout:()=>layouts++});
@@ -19,14 +19,14 @@ test('view preferences clamp sizes and always retain a visible pane',()=>{
 });
 test('one-click layouts preserve DOM and text, store preferences and keep one pane visible',()=>{
   const a=viewApp();a.input.value='보존';const frame=a.frame;
-  a.q('[data-layout="preview"]').click();assert.equal(a.input.hidden,true);assert.equal(a.q('[data-layout="preview"]').getAttribute('aria-pressed'),'true');assert.equal(a.q('#pane-divider').hidden,true);
-  a.q('[data-layout="source"]').click();assert.equal(a.input.hidden,false);assert.equal(a.q('[data-layout="source"]').getAttribute('aria-pressed'),'true');assert.equal(a.frame,frame);assert.equal(a.input.value,'보존');
+  a.controller.selectLayout('preview');assert.equal(a.input.hidden,true);assert.equal(a.q('#pane-divider').hidden,true);
+  a.controller.selectLayout('source');assert.equal(a.input.hidden,false);assert.equal(a.q('#main-app').classList.contains('source-only'),true);assert.equal(a.frame,frame);assert.equal(a.input.value,'보존');
   assert.equal(JSON.parse(a.w.localStorage.getItem('k-fountain.view.v1')).preview,false);a.q('#view-reset').click();assert.equal(a.frame.parentElement.hidden,false);assert.equal(a.input.style.fontSize,'14px');a.close();
 });
 test('Ctrl-wheel changes source size only and waits for composition to finish',()=>{
   const a=viewApp(),wheel=ctrl=>{const e=new a.w.WheelEvent('wheel',{ctrlKey:ctrl,deltaY:-100,cancelable:true});a.input.dispatchEvent(e);return e.defaultPrevented;};
   assert.equal(wheel(false),false);assert.equal(a.input.style.fontSize,'14px');assert.equal(wheel(true),true);assert.equal(a.input.style.fontSize,'15px');
-  a.busy=true;a.q('[data-layout="preview"]').click();a.change('#source-size',30);assert.equal(a.input.hidden,false);assert.equal(a.input.style.fontSize,'15px');
+  a.busy=true;a.controller.selectLayout('preview');a.change('#source-size',30);assert.equal(a.input.hidden,false);assert.equal(a.input.style.fontSize,'15px');
   a.busy=false;a.controller.flush();assert.equal(a.input.hidden,true);assert.equal(a.input.style.fontSize,'30px');a.close();
 });
 test('splitter keyboard controls retain separate horizontal and vertical ratios',()=>{

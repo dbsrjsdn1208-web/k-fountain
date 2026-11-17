@@ -5,19 +5,17 @@ export function validateView(value={}){
   if(!view.source&&!view.preview)view.source=true;
   return view;
 }
-export function installViewControls({doc,input,frame,isBusy=()=>false,onLayout=()=>{},restoreFocus=()=>{}}){
+export function installViewControls({doc,input,frame,isBusy=()=>false,onLayout=()=>{}}){
   const win=doc.defaultView,key='k-fountain.view.v1',$=s=>doc.querySelector(s),main=$('#main-app'),divider=$('#pane-divider');
-  const choices=[...doc.querySelectorAll('[data-layout]')];
-  let view={...VIEW_DEFAULTS},pending=null,focusPending=false,drag=null;
+  let view={...VIEW_DEFAULTS},pending=null,drag=null;
   try{view=validateView(JSON.parse(win.localStorage.getItem(key)||'{}'));}catch{}
   const narrow=win.matchMedia('(max-width:700px)');
   const apply=()=>{
     input.hidden=!view.source;frame.parentElement.hidden=!view.preview;divider.hidden=!(view.source&&view.preview);
     main.classList.toggle('single-pane',divider.hidden);
+    main.classList.toggle('source-only',view.source&&!view.preview);
     main.style.setProperty('--source-share',view[narrow.matches?'vertical':'horizontal']);
     input.style.fontSize=view.size+'px';
-    const layout=view.source?(view.preview?'split':'source'):'preview';
-    for(const choice of choices)choice.setAttribute('aria-pressed',String(choice.dataset.layout===layout));
     $('#source-size').value=view.size;
     divider.setAttribute('aria-orientation',narrow.matches?'horizontal':'vertical');
     divider.setAttribute('aria-valuenow',String(view[narrow.matches?'vertical':'horizontal']));
@@ -25,12 +23,10 @@ export function installViewControls({doc,input,frame,isBusy=()=>false,onLayout=(
     onLayout(view);
   };
   const change=patch=>{if(isBusy()){pending={...(pending||{}),...patch};return;}view=validateView({...view,...patch});apply();};
-  const flush=()=>{if(pending&&!isBusy()){const patch=pending;pending=null;change(patch);if(focusPending){focusPending=false;restoreFocus();}}};
-  function selectLayout(layout,{focus=false}={}){
+  const flush=()=>{if(pending&&!isBusy()){const patch=pending;pending=null;change(patch);}};
+  function selectLayout(layout){
     change({source:layout!=='preview',preview:layout!=='source'});
-    if(focus){if(isBusy())focusPending=true;else restoreFocus();}
   }
-  for(const choice of choices)choice.onclick=()=>selectLayout(choice.dataset.layout,{focus:true});
   $('#source-size').onchange=e=>change({size:e.target.value});
   $('#view-reset').onclick=()=>change({...VIEW_DEFAULTS});
   input.addEventListener('wheel',e=>{if(!e.ctrlKey||!e.deltaY)return;e.preventDefault();change({size:view.size+(e.deltaY<0?1:-1)});},{passive:false});
