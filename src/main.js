@@ -253,15 +253,28 @@ $('#preview-edit').onclick=()=>{
   renderNow();
   lastEditTime=0;
   const hidden=frame.parentElement.hidden,win=frame.contentWindow;
-  const readAnchor=()=>hidden?null:previewViewportAnchor(previewDoc,navigationSnapshot.records,Math.min(48,win.innerHeight*.1),previewEditor.enabled?previewEditor.nodeMaps:null);
-  const anchor=readAnchor(),scroll=win.scrollY;
+  const records=navigationSnapshot.records,maps=previewEditor.enabled?previewEditor.nodeMaps:null;
+  const source=sourceSelection();
+  const previous=previewEditor.enabled?(previewEditor.readSelection()||previewEditor.selection):pausedPreviewSelection(source)||source;
+  let anchor=null;
+  if(!hidden&&previous){
+    let pos=previous.focus,rect=renderedPositionRect(previewDoc,records,pos,maps);
+    if(!rect?.height){
+      const preceding=[...records.values()].reverse().find(record=>record.rawEnd<=pos&&!input.value.slice(record.rawEnd,pos).trim()&&record.map.length);
+      const glyph=preceding?.map.findLast(span=>span&&span[0]!==span[1]);
+      if(glyph){pos=glyph[0];rect=renderedPositionRect(previewDoc,records,pos,maps);}
+    }
+    if(rect?.height&&rect.top>=0&&rect.bottom<=win.innerHeight)anchor={selection:{focus:pos},top:rect.top};
+  }
+  if(!hidden&&!anchor)anchor=previewViewportAnchor(previewDoc,records,0,maps);
+  const scroll=win.scrollY;
   const restoreViewport=()=>{
     if(hidden)return;
     const rect=anchor&&renderedPositionRect(previewDoc,navigationSnapshot.records,anchor.selection.focus,previewEditor.enabled?previewEditor.nodeMaps:null);
     win.scrollTo(0,rect?.height?win.scrollY+rect.top-anchor.top:scroll);
   };
   if(previewEditor.enabled){
-    const selection=previewEditor.readSelection()||previewEditor.selection;
+    const selection=previous;
     const caret=previewEditor.caretRect();
     const visible=selection&&caret?.height&&caret.top>=0&&caret.bottom<=frame.contentWindow.innerHeight;
     previewEditor.toggle(false);
@@ -269,8 +282,7 @@ $('#preview-edit').onclick=()=>{
     restoreViewport();
     pausedPreview=visible?{selection,version:sourceEdits.version,key:previewKey,viewport:previewViewport()}:null;
   }else{
-    const selection=sourceSelection();
-    const next=hidden?selection:pausedPreviewSelection(selection)||visiblePreviewAnchor(previewDoc,navigationSnapshot.records,selection).selection;
+    const next=hidden?source:pausedPreviewSelection(source)||visiblePreviewAnchor(previewDoc,records,source).selection;
     pausedPreview=null;
     if(hidden)viewControls.selectLayout('split');
     previewEditor.toggle(true,next);

@@ -35,7 +35,7 @@ main.preview-blank-active{caret-color:transparent;}
 @media(prefers-reduced-motion:reduce){#preview-blank-caret{animation:none;}}
 .preview-raw{display:block;box-sizing:border-box;width:100%;min-height:3em;resize:none;font:inherit;line-height:1.5;white-space:pre-wrap;border:1px solid #3594cf;border-radius:3px;padding:8px;color:inherit;background:transparent;caret-color:currentColor;}
 .preview-slot{min-height:var(--default-line-height,1.5em);white-space:pre-wrap;margin:0;}
-.preview-slot>[class],.preview-slot>span{line-height:inherit;}
+.preview-slot>span{line-height:inherit;}
 .preview-number{user-select:none;}
 .preview-syntax{color:#77818d;}
 .preview-note{color:#77818d;font-weight:400;font-style:normal;text-decoration:none;white-space:pre-wrap;}
@@ -102,18 +102,37 @@ export class PreviewEditor{
     this.main.setAttribute('aria-label',this.live()?'대본 라이브 프리뷰':this.full()?'대본 직접 편집':'대본 미리보기');
     this.main.setAttribute('role',this.full()?'textbox':'document');this.main.setAttribute('aria-multiline','true');
     this.main.spellcheck=false;
-    this.points=[];this.spans=[];this.nodeMaps=new WeakMap();if(!this.enabled)return;
-    this.decorateLive(anchor);
+    this.points=[];this.spans=[];this.nodeMaps=new WeakMap();
+    if(this.enabled)this.decorateLive(anchor);
+    else this.placeReadingSlots();
   }
   // Empty source lines continue the previous dialogue until a second newline.
-  placeSlot(el,pos,ranges){
-    const previous=ranges.findLast(b=>b.rec.rawEnd===pos-1);
-    if(previous&&['character','dialogue','parenthetical'].includes(previous.rec.type)){
+  placeSlot(el,pos,previous,next){
+    if(previous?.rec.rawEnd===pos-1&&['character','dialogue','parenthetical'].includes(previous.rec.type)){
       el.classList.add('dialogue');previous.el.after(el);return;
     }
-    const next=ranges.find(b=>b.rec.rawStart>=pos);
     if(next){let top=next.el;while(top.parentElement!==this.main)top=top.parentElement;top.before(el);}
     else this.main.append(el);
+  }
+  placeReadingSlots(){
+    const snapshot=this.getSnapshot(),source=this.input.value;
+    const records=[...this.main.querySelectorAll('[data-token]')].map(el=>({el,rec:snapshot.records.get(el.dataset.token)})).filter(block=>block.rec);
+    const notes=noteRanges(source);
+    this.visitGaps(records,(line,pos,previous,next)=>{
+      if(line||!source||notes.some(([a,b])=>pos>=a&&pos<b))return;
+      const el=this.doc.createElement('p');el.className='preview-slot';el.setAttribute('aria-hidden','true');
+      this.placeSlot(el,pos,previous,next);
+    });
+  }
+  visitGaps(blocks,visit){
+    const covered=blocks.slice().sort((a,b)=>a.rec.rawStart-b.rec.rawStart);
+    let pos=0,i=0;
+    for(const line of this.input.value.split('\n')){
+      while(i<covered.length&&covered[i].rec.rawEnd<=pos)i++;
+      const next=covered[i];
+      if(!next||next.rec.rawStart>pos)visit(line,pos,covered[i-1],next);
+      pos+=line.length+1;
+    }
   }
   hiddenRanges(){return noteRanges(this.input.value).filter(([a])=>this.input.value.startsWith('[[',a)?!this.getShowNotes():!this.live());}
   skipHidden(pos,backward){
@@ -141,16 +160,13 @@ export class PreviewEditor{
       block.hidden=this.notes.some(([a,b])=>rec.rawStart>=a&&rec.rawEnd<=b);
       this.liveBlocks.push(block);
     }
-    const covered=this.liveBlocks.slice().sort((a,b)=>a.rec.rawStart-b.rec.rawStart);let pos=0;
-    for(const line of source.split('\n')){
-      if(!covered.some(b=>pos>=b.rec.rawStart&&pos<b.rec.rawEnd)){
+    this.visitGaps(this.liveBlocks,(line,pos,previous,next)=>{
         const el=this.doc.createElement('p');el.className='preview-slot';el.dataset.insertion=pos;
         const rec={rawStart:pos,rawEnd:pos+line.length,sourceStart:pos,sourceEnd:pos+line.length,map:[],formatPairs:[]};
         const note=this.notes.some(([a,b])=>pos>=a&&pos+line.length<=b);
         const block={el,rec,units:new Map(),generated:'',signature:null,hidden:note};
-        this.placeSlot(el,pos,covered);this.liveBlocks.push(block);
-      }pos+=line.length+1;
-    }
+        this.placeSlot(el,pos,previous,next);this.liveBlocks.push(block);
+    });
     this.liveBlocks.sort((a,b)=>a.rec.rawStart-b.rec.rawStart);this.updateLive(false);
     if(this.selection){
       this.restoreSelection(false);
