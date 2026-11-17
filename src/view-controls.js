@@ -1,18 +1,23 @@
-export const VIEW_DEFAULTS={source:true,preview:true,size:14,horizontal:32,vertical:45};
+export const VIEW_DEFAULTS={source:true,preview:true,size:14,horizontal:32,vertical:45,typewriter:false};
 const clamp=(n,min,max,fallback)=>Number.isFinite(+n)?Math.max(min,Math.min(max,+n)):fallback;
 export function validateView(value={}){
-  const view={source:value.source!==false,preview:value.preview!==false,size:clamp(value.size??14,10,40,14),horizontal:clamp(value.horizontal??32,20,80,32),vertical:clamp(value.vertical??45,20,80,45)};
+  const view={source:value.source!==false,preview:value.preview!==false,size:clamp(value.size??14,10,40,14),horizontal:clamp(value.horizontal??32,20,80,32),vertical:clamp(value.vertical??45,20,80,45),typewriter:value.typewriter===true};
   if(!view.source&&!view.preview)view.source=true;
   return view;
 }
 export function installViewControls({doc,input,frame,isBusy=()=>false,onLayout=()=>{},restoreFocus=()=>{}}){
   const win=doc.defaultView,key='k-fountain.view.v1',$=s=>doc.querySelector(s),main=$('#main-app'),divider=$('#pane-divider');
   const choices=[...doc.querySelectorAll('[data-layout]')];
+  const sourcePane=input.parentElement,typewriter=$('#source-typewriter');
   let view={...VIEW_DEFAULTS},pending=null,focusPending=false,drag=null;
   try{view=validateView(JSON.parse(win.localStorage.getItem(key)||'{}'));}catch{}
   const narrow=win.matchMedia('(max-width:700px)');
   const apply=()=>{
-    input.hidden=!view.source;frame.parentElement.hidden=!view.preview;divider.hidden=!(view.source&&view.preview);
+    const split=view.source&&view.preview;
+    input.hidden=sourcePane.hidden=!view.source;frame.parentElement.hidden=!view.preview;divider.hidden=!split;
+    sourcePane.classList.toggle('typewriter-active',split&&view.typewriter);
+    typewriter.checked=view.typewriter;
+    typewriter.disabled=!split;
     main.classList.toggle('single-pane',divider.hidden);
     main.style.setProperty('--source-share',view[narrow.matches?'vertical':'horizontal']);
     input.style.fontSize=view.size+'px';
@@ -32,6 +37,7 @@ export function installViewControls({doc,input,frame,isBusy=()=>false,onLayout=(
   }
   for(const choice of choices)choice.onclick=()=>selectLayout(choice.dataset.layout,{focus:true});
   $('#source-size').onchange=e=>change({size:e.target.value});
+  typewriter.onchange=e=>change({typewriter:e.target.checked});
   $('#view-reset').onclick=()=>change({...VIEW_DEFAULTS});
   input.addEventListener('wheel',e=>{if(!e.ctrlKey||!e.deltaY)return;e.preventDefault();change({size:view.size+(e.deltaY<0?1:-1)});},{passive:false});
   const ratio=e=>{const r=main.getBoundingClientRect();return 100*(narrow.matches?(e.clientY-r.top)/r.height:(e.clientX-r.left)/r.width);};

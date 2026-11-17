@@ -6,7 +6,7 @@ import {printHTML} from '../src/print-document.js';
 import {parseScreenplay,renderPreview,exportReadableText} from '../src/screenplay.js';
 
 function viewApp(){
-  const dom=new JSDOM('<div id="view-menu"><button data-layout="source"></button><button data-layout="split"></button><button data-layout="preview"></button><input id="source-size"><button id="view-reset"></button></div><div id="main-app"><textarea id="fountain-editor"></textarea><div id="pane-divider"></div><section><iframe></iframe></section></div>',{url:'https://example.test'});
+  const dom=new JSDOM('<div id="view-menu"><button data-layout="source"></button><button data-layout="split"></button><button data-layout="preview"></button><input id="source-size"><input id="source-typewriter" type="checkbox"><button id="view-reset"></button></div><div id="main-app"><div id="source-pane"><textarea id="fountain-editor"></textarea></div><div id="pane-divider"></div><section><iframe></iframe></section></div>',{url:'https://example.test'});
   const w=dom.window,doc=w.document,q=s=>doc.querySelector(s),input=q('textarea'),frame=q('iframe'),media={matches:false,addEventListener(_,fn){this.update=fn;}};
   w.matchMedia=()=>media;let busy=false,layouts=0;
   const controller=installViewControls({doc,input,frame,isBusy:()=>busy,onLayout:()=>layouts++});
@@ -14,7 +14,7 @@ function viewApp(){
   return {dom,w,q,input,frame,media,controller,change,set busy(v){busy=v;},get layouts(){return layouts;},close:()=>w.close()};
 }
 test('view preferences clamp sizes and always retain a visible pane',()=>{
-  assert.deepEqual(validateView({source:false,preview:false,size:500,horizontal:0,vertical:200}),{source:true,preview:false,size:40,horizontal:20,vertical:80});
+  assert.deepEqual(validateView({source:false,preview:false,size:500,horizontal:0,vertical:200}),{source:true,preview:false,size:40,horizontal:20,vertical:80,typewriter:false});
   assert.equal(validateView({size:'bad'}).size,14);
 });
 test('one-click layouts preserve DOM and text, store preferences and keep one pane visible',()=>{
@@ -33,6 +33,17 @@ test('splitter keyboard controls retain separate horizontal and vertical ratios'
   const a=viewApp(),divider=a.q('#pane-divider'),press=key=>divider.dispatchEvent(new a.w.KeyboardEvent('keydown',{key,cancelable:true}));
   press('ArrowRight');assert.equal(a.controller.state.horizontal,37);press('End');assert.equal(a.controller.state.horizontal,80);
   a.media.matches=true;a.media.update();press('ArrowUp');assert.equal(a.controller.state.vertical,40);assert.equal(a.controller.state.horizontal,80);assert.equal(divider.getAttribute('aria-orientation'),'horizontal');a.close();
+});
+test('typewriter is active only in split view and remembers its setting',()=>{
+  const a=viewApp(),pick=a.q('#source-typewriter'),pane=a.q('#source-pane');
+  assert.equal(pick.checked,false);
+  pick.click();assert.equal(pane.classList.contains('typewriter-active'),true);
+  a.q('[data-layout="source"]').click();assert.equal(pick.disabled,true);assert.equal(pane.classList.contains('typewriter-active'),false);
+  a.q('[data-layout="preview"]').click();assert.equal(pane.hidden,true);
+  a.q('[data-layout="split"]').click();assert.equal(pane.hidden,false);assert.equal(pane.classList.contains('typewriter-active'),true);
+  assert.equal(JSON.parse(a.w.localStorage.getItem('k-fountain.view.v1')).typewriter,true);
+  a.q('#view-reset').click();assert.equal(pick.checked,false);assert.equal(pane.classList.contains('typewriter-active'),false);
+  a.close();
 });
 test('print and readable output always exclude notes, even with blank lines and visible notes enabled',()=>{
   const source='.방\n\n앞[[메모 **별표** <img src=x>]]뒤\n\n[[여러 줄\n\n비밀]]\n\n@민서\n**대사**',settings={showNotes:true,font:'맑은 고딕',size:12};

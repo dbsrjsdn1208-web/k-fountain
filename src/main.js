@@ -32,6 +32,7 @@ const $=s=>document.querySelector(s),files=new FileSession();
 let elements,framePending=0,composing=false,dirty=false,previewText=null,previewKey='',toastTimer,recoveryTimer,revision=0;
 let history=[],historyIndex=-1,lastEditTime=0,lastEditType='',installPrompt;
 let previewEditor,viewControls,sceneOutline,outlineVersion,lastPane='source',lastPreviewSelection=null,followFrame=0;
+let typewriterFrame=0;
 document.querySelector('#app').innerHTML=`
 <header id="header-panel"><div class="title">K-파운틴</div><button id="install" hidden>앱 설치</button></header>
 <div id="top-panel">
@@ -68,6 +69,8 @@ document.querySelector('#app').innerHTML=`
         </div>
         <label for="source-size">원본 글자 크기 <input id="source-size" type="number" min="10" max="40" step="1"> px</label>
         <small>원본에서 Ctrl+휠로 조절</small>
+        <label class="typewriter-option"><input id="source-typewriter" type="checkbox"> 원본 타자기식 작성</label>
+        <small>나란히 보기에서 입력하는 줄을 가운데에 유지</small>
         <button id="view-reset">화면 배치 초기화</button>
       </div>
     </div>
@@ -80,7 +83,7 @@ document.querySelector('#app').innerHTML=`
     <input type="search" aria-label="장면 제목 또는 번호 찾기" placeholder="장면 찾기">
     <nav aria-label="장면 이동"><ol id="scene-list"></ol><p id="scene-empty" aria-live="polite"></p></nav>
   </aside>
-  <div id="main-app"><textarea id="fountain-editor" aria-label="Fountain 원고" spellcheck="false" wrap="soft" placeholder=".장소 / 시간&#10;&#10;@인물&#10;대사"></textarea><div id="pane-divider" role="separator" tabindex="0" aria-label="원본과 미리보기 크기 조절" aria-valuemin="20" aria-valuemax="80"></div><section id="html-render"><iframe id="preview" title="대본 미리보기" sandbox="allow-same-origin allow-modals"></iframe></section></div>
+  <div id="main-app"><div id="source-pane"><textarea id="fountain-editor" aria-label="Fountain 원고" spellcheck="false" wrap="soft" placeholder=".장소 / 시간&#10;&#10;@인물&#10;대사"></textarea></div><div id="pane-divider" role="separator" tabindex="0" aria-label="원본과 미리보기 크기 조절" aria-valuemin="20" aria-valuemax="80"></div><section id="html-render"><iframe id="preview" title="대본 미리보기" sandbox="allow-same-origin allow-modals"></iframe></section></div>
 </div>
 <footer id="footer-panel"><span id="file-status">${recovered?'임시 원고 복원됨':'파일을 저장해 주세요'}</span><span id="recovery-status"></span><span class="credit"><a href="https://github.com/wixette/fountain2html" target="_blank" rel="noopener">fountain2html</a> · Apache-2.0</span></footer>
 <input id="file-input" type="file" accept=".fountain,.txt,.json" hidden>
@@ -125,7 +128,7 @@ function normalize(deferCue=false){
   if(deferCue){const line=previous.slice(0,input.selectionStart).split('\n').length-1,a=previous.split('\n'),b=next.split('\n');if(!a[line]?.trimStart().startsWith('@')&&b[line]?.trimStart().startsWith('@')){b[line]=b[line].replace('@','');next=b.join('\n');}}
   if(next!==previous){const [start,end]=mapSelection(previous,next,input.selectionStart,input.selectionEnd),scroll=input.scrollTop;input.value=next;input.setSelectionRange(start,end);input.scrollTop=scroll;}
 }
-function changed(){sourceEdits.record(input.value);state.text=input.value;revision++;dirty=files.lastSaved!==input.value;updateStatus();queueRender();queueRecovery();}
+function changed(){sourceEdits.record(input.value);state.text=input.value;revision++;dirty=files.lastSaved!==input.value;updateStatus();queueRender();queueRecovery();queueTypewriter();}
 function updateStatus(){const name=files.handle?.name||state.title+'.fountain';$('#file-status').textContent=files.handle?`${name} · ${dirty?'변경됨':'파일에 저장됨'}`:files.lastSaved!==null?`${name} · ${dirty?'변경됨':'다운로드됨'}`:'파일 저장 위치 미지정';}
 function queueRecovery(){clearTimeout(recoveryTimer);recoveryTimer=setTimeout(saveRecovery,350);}
 function saveRecovery(){try{state.text=input.value;localStorage.setItem(STORAGE,JSON.stringify(state));$('#recovery-status').textContent='임시 복구본 보관됨';return true;}catch{$('#recovery-status').textContent='임시 복구본 저장 실패';return false;}}
@@ -203,14 +206,28 @@ function focusPreviewAtSource(){
   previewEditor.updateLive(false);
   previewEditor.restoreSelection();
 }
+function typewriterActive(){return input.parentElement.classList.contains('typewriter-active');}
+function centerSourceCaret(){
+  const pos=input.selectionDirection==='backward'?input.selectionStart:input.selectionEnd;
+  revealCaret(input,pos,{center:true});
+}
+function queueTypewriter(){
+  if(typewriterFrame||composing||!typewriterActive()||document.activeElement!==input)return;
+  typewriterFrame=requestAnimationFrame(()=>{
+    typewriterFrame=0;
+    if(!composing&&typewriterActive()&&document.activeElement===input)centerSourceCaret();
+  });
+}
 function layoutChanged(){
   requestAnimationFrame(()=>{
     if(composing||previewEditor.busy())return;
     if(input.hidden&&document.activeElement===input){lastPane='preview';restoreWorkFocus();}
     else if(frame.parentElement.hidden&&document.activeElement===frame){lastPane='source';restoreWorkFocus();}
+    const centered=lastPane==='source'&&typewriterActive();
+    if(centered)centerSourceCaret();
     if(state.settings.follow){
       if(lastPane==='preview'&&lastPreviewSelection&&!input.hidden){const pos=sourceEdits.map(lastPreviewSelection.focus,lastPreviewSelection.version);if(pos!==null)revealCaret(input,pos);}
-      else if(lastPane==='source'){revealCaret(input,input.selectionEnd);followCaret();}
+      else if(lastPane==='source'){if(!centered)revealCaret(input,input.selectionEnd);followCaret();}
     }
     if(!frame.parentElement.hidden&&lastPane==='preview'&&previewEditor.enabled)previewEditor.revealCaret();
   });
@@ -246,7 +263,7 @@ $('#preview-edit').onclick=()=>{
   $('#preview-edit').setAttribute('aria-pressed',String(previewEditor.enabled));
 };
 document.addEventListener('pointerdown',()=>previewEditor.clearSelection());
-input.addEventListener('focus',()=>{lastPane='source';previewEditor.clearSelection();});
+input.addEventListener('focus',()=>{lastPane='source';previewEditor.clearSelection();queueTypewriter();});
 installPreviewNavigation({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,isComposing:()=>composing||previewEditor.enabled||input.hidden,onNavigate:()=>{suppressFollow=true;}});
 input.addEventListener('beforeinput',event=>{
   suppressFollow=false;
@@ -268,7 +285,12 @@ input.addEventListener('keydown',event=>{
   if((event.ctrlKey||event.metaKey)&&(key==='z'||key==='y')){event.preventDefault();restoreHistory(key==='y'||event.shiftKey?1:-1);}
 });
 const sourcePositionChanged=()=>{sceneOutline.locate(input.selectionEnd);followCaret();};
-input.addEventListener('keyup',sourcePositionChanged);input.addEventListener('click',()=>{suppressFollow=false;sourcePositionChanged();});input.addEventListener('select',sourcePositionChanged);
+input.addEventListener('keyup',event=>{
+  sourcePositionChanged();
+  if(/^(?:Arrow|Home|End|Page)/.test(event.key))queueTypewriter();
+});
+input.addEventListener('click',()=>{suppressFollow=false;sourcePositionChanged();queueTypewriter();});
+input.addEventListener('select',()=>{sourcePositionChanged();queueTypewriter();});
 document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'&&!composing){event.preventDefault();saveFile(event.shiftKey);}});
 function filename(){return (state.title.trim()||'제목 없는 시나리오').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\.fountain$/i,'');}
 function download(data,name,type='text/plain;charset=utf-8'){const blob=data instanceof Blob?data:new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}

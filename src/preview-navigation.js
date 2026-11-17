@@ -51,8 +51,8 @@ export class SourceEdits{
 }
 
 // Match the actual textarea's wrapping, including scrollbar width and tabs.
-// Kept outside layout/accessibility and updated only for a navigation click.
-export function revealCaret(input,pos){
+// The mirror stays outside layout and uses the same text wrapping as the source.
+export function revealCaret(input,pos,{center=false}={}){
   const doc=input.ownerDocument,css=doc.defaultView.getComputedStyle(input),mirror=doc.createElement('div');
   mirror.setAttribute('aria-hidden','true');
   for(const property of ['fontFamily','fontSize','fontWeight','fontStyle','fontVariant','fontStretch','lineHeight','letterSpacing','wordSpacing','textIndent','textTransform','textAlign','direction','tabSize','paddingTop','paddingBottom','paddingLeft','paddingRight','overflowWrap','wordBreak'])mirror.style[property]=css[property];
@@ -65,7 +65,8 @@ export function revealCaret(input,pos){
   try{
     const base=mirror.getBoundingClientRect(),rect=marker.getBoundingClientRect(),top=rect.top-base.top,bottom=rect.bottom-base.top;
     const margin=Math.min(24,input.clientHeight/4),viewTop=input.scrollTop,viewBottom=viewTop+input.clientHeight;
-    if(top<viewTop)input.scrollTop=Math.max(0,top-margin);
+    if(center)input.scrollTop=Math.max(0,(top+bottom-input.clientHeight)/2);
+    else if(top<viewTop)input.scrollTop=Math.max(0,top-margin);
     else if(bottom>viewBottom)input.scrollTop=Math.max(0,bottom-input.clientHeight+margin);
     if(input.wrap==='off'){const left=rect.left-base.left,right=rect.right-base.left;if(left<input.scrollLeft+margin)input.scrollLeft=Math.max(0,left-margin);else if(right>input.scrollLeft+input.clientWidth-margin)input.scrollLeft=right-input.clientWidth+margin;}
   }finally{mirror.remove();}

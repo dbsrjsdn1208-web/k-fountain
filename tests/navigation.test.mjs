@@ -67,6 +67,7 @@ test('caret mirror keeps visible positions still, reveals outside positions, and
   w.HTMLElement.prototype.getBoundingClientRect=function(){if(this.tagName==='SPAN'){mirror=this.parentNode;return {top,bottom:top+20,left:0,right:10};}return {top:0,left:0};};
   revealCaret(input,5);assert.equal(input.scrollTop,100);assert.equal(mirror.style.width,'240px');assert.equal(mirror.style.fontFamily,'monospace');assert.equal(mirror.style.whiteSpace,'pre-wrap');assert.equal(mirror.querySelector('span').textContent,'😊');assert.equal(mirror.isConnected,false);
   top=480;revealCaret(input,5);assert.equal(input.scrollTop,324);
+  revealCaret(input,5,{center:true});assert.equal(input.scrollTop,390);
   top=20;revealCaret(input,5);assert.equal(input.scrollTop,0);dom.window.close();
 });
 
