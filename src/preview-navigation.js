@@ -52,136 +52,23 @@ export class SourceEdits{
 
 // Match the actual textarea's wrapping, including scrollbar width and tabs.
 // Kept outside layout/accessibility and updated only for a navigation click.
-function withSourceMirror(input,read){
+export function revealCaret(input,pos){
   const doc=input.ownerDocument,css=doc.defaultView.getComputedStyle(input),mirror=doc.createElement('div');
   mirror.setAttribute('aria-hidden','true');
   for(const property of ['fontFamily','fontSize','fontWeight','fontStyle','fontVariant','fontStretch','lineHeight','letterSpacing','wordSpacing','textIndent','textTransform','textAlign','direction','tabSize','paddingTop','paddingBottom','paddingLeft','paddingRight','overflowWrap','wordBreak'])mirror.style[property]=css[property];
   Object.assign(mirror.style,{position:'fixed',left:'-100000px',top:'0',visibility:'hidden',pointerEvents:'none',boxSizing:'border-box',width:input.clientWidth+'px',whiteSpace:input.wrap==='off'?'pre':'pre-wrap',overflowWrap:input.wrap==='off'?'normal':'break-word',border:'0',margin:'0'});
-  const text=doc.createTextNode(input.value+'\u200b');mirror.append(text);doc.body.append(mirror);
+  const before=doc.createTextNode(input.value.slice(0,pos)),marker=doc.createElement('span');
+  // Keep following text: it controls word wrapping at the insertion point.
+  const next=segmenter.segment(input.value.slice(pos))[Symbol.iterator]().next().value?.segment||'';
+  marker.textContent=next||'\u200b';
+  mirror.append(before,marker,doc.createTextNode(input.value.slice(pos+next.length)));doc.body.append(mirror);
   try{
-    const base=mirror.getBoundingClientRect();
-    return read(text,pos=>sourceRect(doc,text,pos,base),mirror,base);
+    const base=mirror.getBoundingClientRect(),rect=marker.getBoundingClientRect(),top=rect.top-base.top,bottom=rect.bottom-base.top;
+    const margin=Math.min(24,input.clientHeight/4),viewTop=input.scrollTop,viewBottom=viewTop+input.clientHeight;
+    if(top<viewTop)input.scrollTop=Math.max(0,top-margin);
+    else if(bottom>viewBottom)input.scrollTop=Math.max(0,bottom-input.clientHeight+margin);
+    if(input.wrap==='off'){const left=rect.left-base.left,right=rect.right-base.left;if(left<input.scrollLeft+margin)input.scrollLeft=Math.max(0,left-margin);else if(right>input.scrollLeft+input.clientWidth-margin)input.scrollLeft=right-input.clientWidth+margin;}
   }finally{mirror.remove();}
-}
-
-function sourceRect(doc,text,pos,base){
-  const range=doc.createRange();
-  range.setStart(text,pos);range.setEnd(text,Math.min(pos+1,text.length));
-  const r=range.getBoundingClientRect?.();
-  return r?{top:r.top-base.top,bottom:r.bottom-base.top,left:r.left-base.left,right:r.right-base.left}:null;
-}
-
-export function revealCaret(input,pos){
-  const rect=withSourceMirror(input,(text,_,mirror,base)=>{
-    const next=segmenter.segment(input.value.slice(pos))[Symbol.iterator]().next().value?.segment||'';
-    const marker=input.ownerDocument.createElement('span');
-    marker.textContent=next||'\u200b';
-    mirror.replaceChildren(text.data.slice(0,pos),marker,input.value.slice(pos+next.length));
-    const r=marker.getBoundingClientRect();
-    return {top:r.top-base.top,bottom:r.bottom-base.top,left:r.left-base.left,right:r.right-base.left};
-  });
-  const {top,bottom,left,right}=rect;
-  const margin=Math.min(24,input.clientHeight/4),viewTop=input.scrollTop,viewBottom=viewTop+input.clientHeight;
-  if(top<viewTop)input.scrollTop=Math.max(0,top-margin);
-  else if(bottom>viewBottom)input.scrollTop=Math.max(0,bottom-input.clientHeight+margin);
-  if(input.wrap==='off'){
-    if(left<input.scrollLeft+margin)input.scrollLeft=Math.max(0,left-margin);
-    else if(right>input.scrollLeft+input.clientWidth-margin)input.scrollLeft=right-input.clientWidth+margin;
-  }
-}
-
-export function sourceViewportAnchor(input,{anchor,focus}){
-  return withSourceMirror(input,(text,measure)=>{
-    const caret=measure(focus),top=input.scrollTop,height=input.clientHeight;
-    if(!caret||!height)return {anchor,focus,ratio:null};
-    if(caret.bottom>top&&caret.top<top+height)return {anchor,focus,ratio:(caret.top-top)/height};
-    let low=0,high=input.value.length;
-    while(low<high){
-      const mid=(low+high)>>>1;
-      if(measure(mid).bottom<=top+8)low=mid+1;else high=mid;
-    }
-    const pos=segmenter.segment(text.data).containing(low)?.index??low;
-    return {anchor:pos,focus:pos,ratio:(measure(pos).top-top)/height};
-  });
-}
-
-export function placeSourceAnchor(input,pos,ratio){
-  if(ratio===null){revealCaret(input,pos);return;}
-  const rect=withSourceMirror(input,(_,measure)=>measure(pos));
-  if(rect)input.scrollTop=Math.max(0,rect.top-input.clientHeight*Math.max(0,Math.min(.9,ratio)));
-}
-
-function* previewTextNodes(doc,blocks,records,editor){
-  for(const block of blocks){
-    const record=records?.get(block.dataset.token);
-    const walker=doc.createTreeWalker(block,4);
-    let index=0,node;
-    while((node=walker.nextNode())){
-      const map=editor.enabled?editor.nodeMaps.get(node):record?.map.slice(index,index+node.length);
-      if(map?.length)yield {node,map};
-      index+=node.length;
-    }
-  }
-}
-
-function glyphRect(doc,node,index){
-  const range=doc.createRange();
-  range.setStart(node,index);range.setEnd(node,index+1);
-  return range.getBoundingClientRect?.();
-}
-
-export function previewPositionRect(doc,records,editor,pos){
-  const blocks=[...doc.querySelectorAll('[data-token],[data-insertion]')].filter(block=>{
-    if(block.hasAttribute('data-insertion'))return Number(block.dataset.insertion)===pos;
-    const r=records?.get(block.dataset.token);
-    return r&&pos>=r.rawStart&&pos<=r.rawEnd;
-  });
-  let closest=null,distance=Infinity;
-  for(const {node,map} of previewTextNodes(doc,blocks,records,editor)){
-    for(const [index,span] of map.entries()){
-      if(!span||span[0]===span[1])continue;
-      const d=Math.min(Math.abs(span[0]-pos),Math.abs(span[1]-pos));
-      if(d<distance){distance=d;closest={node,index};}
-      if(span[0]===pos)return glyphRect(doc,node,index);
-    }
-  }
-  return closest?glyphRect(doc,closest.node,closest.index):blocks[0]?.getBoundingClientRect();
-}
-
-export function previewViewportAnchor(doc,records,editor,selection=null){
-  const height=doc.defaultView.innerHeight;
-  const at=selection&&previewPositionRect(doc,records,editor,selection.focus);
-  if(at?.height&&at.bottom>0&&at.top<height)return {...selection,ratio:at.top/height};
-  const blocks=[...doc.querySelectorAll('[data-token],[data-insertion]')].filter(block=>{
-    const rect=block.getBoundingClientRect();return rect.height&&rect.bottom>8&&rect.top<height;
-  });
-  let best=null;
-  for(const {node,map} of previewTextNodes(doc,blocks,records,editor)){
-    let low=0,high=node.length-1;
-    while(low<high){
-      const mid=(low+high)>>>1;
-      if((glyphRect(doc,node,mid)?.bottom??0)<=8)low=mid+1;else high=mid;
-    }
-    for(let i=low;i<map.length;i++){
-      const span=map[i];
-      if(!span||span[0]===span[1])continue;
-      const rect=glyphRect(doc,node,i);
-      if(!rect?.height||rect.bottom<=8)continue;
-      if(rect.top>=height)break;
-      if(!best||rect.top<best.top)best={pos:span[0],top:rect.top};
-      break;
-    }
-  }
-  return best?{anchor:best.pos,focus:best.pos,ratio:best.top/height}:null;
-}
-
-export function placePreviewAnchor(doc,records,editor,pos,ratio){
-  const rect=previewPositionRect(doc,records,editor,pos);
-  if(rect?.height){
-    const win=doc.defaultView;
-    const top=win.innerHeight*Math.max(0,Math.min(.9,ratio??.25));
-    win.scrollBy(0,rect.top-top);
-  }
 }
 
 export function installPreviewNavigation({doc,input,getSnapshot,edits,onNavigate,isComposing=()=>false}){

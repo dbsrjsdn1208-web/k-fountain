@@ -5,12 +5,8 @@
 #header-panel #install{margin-right:20px}
 #top-panel{background:#9cf;display:flex;justify-content:space-between;align-items:center;padding:8px 10px;gap:8px;width:100%;flex-wrap:wrap;flex-shrink:0;position:relative;z-index:2}
 .file-tools,.output-tools{display:flex;align-items:center;gap:6px;min-width:0}
-#writing-modes{display:flex;gap:3px;padding:3px;border:1px solid #76b4ec;border-radius:7px;background:#e4f2ff}
 #top-panel button,#title{background:#f9f9f9;border:1px solid #76b4ec;border-radius:6px;font-size:13px;height:38px;padding:0 10px;white-space:nowrap}
 #top-panel button:hover{background:#fff}
-#top-panel #writing-modes button{height:30px;border-color:transparent;background:transparent}
-#top-panel #writing-modes button:hover{background:#fff}
-#top-panel #writing-modes button[aria-pressed="true"]{background:#155c93;color:#fff}
 #title{min-width:0;width:clamp(140px,22vw,290px);font-weight:bold}
 #workspace{position:relative;display:flex;flex:1;min-height:0;min-width:0;overflow:hidden}
 #main-app{display:flex;flex:1;overflow:hidden;min-width:0;min-height:0}
@@ -25,7 +21,8 @@ dialog{font-family:'Segoe UI','Malgun Gothic',sans-serif;border:1px solid #94bfe
 #top-panel .toolbar-menu>button:hover{background:#e4f2ff}
 .toolbar-menu kbd{font:11px 'Courier New',monospace;color:#555}
 #view-menu{padding:10px}
-#top-panel #mode-reading[aria-pressed="true"]{background:#e4f2ff;color:#155c93}
+.layout-options{display:flex;gap:4px;margin-bottom:12px}
+#top-panel .layout-options button{height:32px;padding:0 7px}
 #view-menu label{display:block;margin:4px 0}
 #view-menu input[type=number]{width:58px;padding:3px}
 #view-menu small{display:block;color:#666;margin:0 0 8px}
@@ -44,18 +41,12 @@ dialog{font-family:'Segoe UI','Malgun Gothic',sans-serif;border:1px solid #94bfe
 .scene-number{font-weight:bold;color:#155c93}
 #scene-empty{color:#526679;margin:8px}
 #fountain-editor{flex:var(--source-share,32);border-right:0}#html-render{flex:calc(100 - var(--source-share,32))}#main-app.single-pane>#fountain-editor,#main-app.single-pane>#html-render{flex:1}
-#main-app.source-only>#fountain-editor{
-  padding-block:22px;
-  padding-inline:max(16px, calc((100% - min(44em, 760px)) / 2));
-}
 #pane-divider{flex:0 0 7px;background:#e4f2ff;cursor:col-resize;touch-action:none;outline-offset:-2px}#pane-divider:hover,#pane-divider:focus{background:#9cf}#main-app.resizing{user-select:none}#main-app.resizing iframe{pointer-events:none}
 @media(max-width:700px){
   #header-panel>.title{margin:0 15px;font-size:18px}
   #top-panel{gap:6px;padding:6px}
   .file-tools{flex:1 1 100%}
   .output-tools{width:100%;justify-content:space-between}
-  #writing-modes{width:100%}
-  #writing-modes button{flex:1}
   #top-panel button,#title{height:36px;font-size:12px;padding:0 7px}
   #title{flex:1;width:auto}
   #export-menu{left:0;right:auto}

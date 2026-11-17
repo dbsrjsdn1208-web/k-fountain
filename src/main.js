@@ -4,7 +4,7 @@ import './style.css';
 import {DEFAULT_SETTINGS,escapeHTML as esc,parseScreenplay,renderPreview,previewCSS,exportReadableText} from './screenplay.js';
 import {cleanNames,normalizeText,normalizeNewlines,mapSelection,toggleMarkup,clipboardFountain,migrateLegacy} from './text-tools.js';
 import {FileSession,handleDB} from './file-store.js';
-import {SourceEdits,installPreviewNavigation,revealCaret,sourceViewportAnchor,previewViewportAnchor,placeSourceAnchor,placePreviewAnchor} from './preview-navigation.js';
+import {SourceEdits,installPreviewNavigation,revealCaret} from './preview-navigation.js';
 import {PreviewEditor,editorCSS} from './preview-editor.js';
 import {installViewControls} from './view-controls.js';
 import {installSceneOutline,installToolbarMenus} from './workspace-ui.js';
@@ -32,7 +32,6 @@ const $=s=>document.querySelector(s),files=new FileSession();
 let elements,framePending=0,composing=false,dirty=false,previewText=null,previewKey='',toastTimer,recoveryTimer,revision=0;
 let history=[],historyIndex=-1,lastEditTime=0,lastEditType='',installPrompt;
 let previewEditor,viewControls,sceneOutline,outlineVersion,lastPane='source',lastPreviewSelection=null,followFrame=0;
-let viewedPane='source',switchingWorkspace=false;
 document.querySelector('#app').innerHTML=`
 <header id="header-panel"><div class="title">K-파운틴</div><button id="install" hidden>앱 설치</button></header>
 <div id="top-panel">
@@ -49,11 +48,6 @@ document.querySelector('#app').innerHTML=`
     <input id="title" aria-label="파일 이름" value="${esc(state.title)}">
     <button id="save" title="Ctrl+S">저장</button>
   </div>
-  <div id="writing-modes" role="group" aria-label="작성 화면">
-    <button id="mode-source" aria-pressed="false">원본</button>
-    <button id="mode-live" aria-pressed="false">라이브 미리보기</button>
-    <button id="mode-split" aria-pressed="true">나란히</button>
-  </div>
   <div class="output-tools">
     <button id="preview-edit" aria-pressed="false">미리보기 편집</button>
     <div class="toolbar-group">
@@ -67,7 +61,11 @@ document.querySelector('#app').innerHTML=`
     <div class="toolbar-group">
       <button id="view" data-toolbar-menu aria-expanded="false" aria-controls="view-menu">보기</button>
       <div id="view-menu" class="toolbar-menu" role="group" aria-label="화면 배치" hidden>
-        <button id="mode-reading" aria-pressed="false" data-menu-command>읽기 미리보기</button>
+        <div class="layout-options" role="group" aria-label="표시할 화면">
+          <button data-layout="source" aria-pressed="false" data-menu-command>원본만</button>
+          <button data-layout="split" aria-pressed="true" data-menu-command>나란히</button>
+          <button data-layout="preview" aria-pressed="false" data-menu-command>미리보기만</button>
+        </div>
         <label for="source-size">원본 글자 크기 <input id="source-size" type="number" min="10" max="40" step="1"> px</label>
         <small>원본에서 Ctrl+휠로 조절</small>
         <button id="view-reset">화면 배치 초기화</button>
@@ -177,12 +175,12 @@ function previewSelection(selection,version){
   if(!selection)return;
   const anchor=sourceEdits.map(selection.anchor,version),focus=sourceEdits.map(selection.focus,version);
   if(anchor===null||focus===null)return;
-  lastPreviewSelection={anchor,focus,version:sourceEdits.version};lastPane=viewedPane='preview';
+  lastPreviewSelection={anchor,focus,version:sourceEdits.version};lastPane='preview';
   input.setSelectionRange(Math.min(anchor,focus),Math.max(anchor,focus),focus<anchor?'backward':'forward');
   sceneOutline.locate(focus);
-  if(followFrame||switchingWorkspace)return;
+  if(followFrame)return;
   followFrame=requestAnimationFrame(()=>{
-    followFrame=0;if(lastPane!=='preview'||!lastPreviewSelection||previewEditor.busy()||!state.settings.follow||input.hidden)return;
+    followFrame=0;if(lastPane!=='preview'||previewEditor.busy()||!state.settings.follow||input.hidden)return;
     const pos=sourceEdits.map(lastPreviewSelection.focus,lastPreviewSelection.version);if(pos===null)return;
     suppressFollow=true;revealCaret(input,pos);
   });
@@ -199,18 +197,13 @@ function restoreWorkFocus(){
     previewDoc.querySelector('main').focus({preventScroll:true});
   }else if(!input.hidden)input.focus({preventScroll:true});
 }
-function sourceSelection(){
-  const {selectionStart:start,selectionEnd:end,selectionDirection}=input;
-  return selectionDirection==='backward'?{anchor:end,focus:start}:{anchor:start,focus:end};
-}
 function focusPreviewAtSource(){
-  previewEditor.selection=sourceSelection();
+  const {selectionStart:start,selectionEnd:end,selectionDirection}=input;
+  previewEditor.selection=selectionDirection==='backward'?{anchor:end,focus:start}:{anchor:start,focus:end};
   previewEditor.updateLive(false);
   previewEditor.restoreSelection();
 }
 function layoutChanged(){
-  updateWorkspaceButtons();
-  if(switchingWorkspace)return;
   requestAnimationFrame(()=>{
     if(composing||previewEditor.busy())return;
     if(input.hidden&&document.activeElement===input){lastPane='preview';restoreWorkFocus();}
@@ -222,7 +215,7 @@ function layoutChanged(){
     if(!frame.parentElement.hidden&&lastPane==='preview'&&previewEditor.enabled)previewEditor.revealCaret();
   });
 }
-previewEditor=new PreviewEditor({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,getMode:()=>input.hidden?'source':state.settings.previewEditMode||'source',getShowNotes:()=>state.settings.showNotes===true,onSelection:previewSelection,
+previewEditor=new PreviewEditor({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,getMode:()=>state.settings.previewEditMode||'source',getShowNotes:()=>state.settings.showNotes===true,onSelection:previewSelection,
   apply:(text,start,end,type,auto)=>{suppressFollow=true;input.value=text;input.setSelectionRange(start,end);if(auto)normalize(true);record(type);changed();},
   remember:()=>{if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();},undo:restoreHistory,
   refresh:()=>{previewText=null;renderNow();},notify:toast,save:saveFile});
@@ -243,55 +236,17 @@ function jumpToScene(scene){
   if(!frame.parentElement.hidden)target?.scrollIntoView?.({block:'nearest'});
   sceneOutline.locate(pos);
 }
-function updateWorkspaceButtons(){
-  const singlePreview=input.hidden,sourceOnly=frame.parentElement.hidden,editing=previewEditor.enabled;
-  $('#mode-source').setAttribute('aria-pressed',String(sourceOnly));
-  $('#mode-live').setAttribute('aria-pressed',String(singlePreview&&editing));
-  $('#mode-split').setAttribute('aria-pressed',String(!singlePreview&&!sourceOnly));
-  $('#mode-reading').setAttribute('aria-pressed',String(singlePreview&&!editing));
-  $('#preview-edit').setAttribute('aria-pressed',String(editing&&!sourceOnly));
-}
-function switchWorkspace(layout,editing,pane,origin=viewedPane){
-  if(composing||previewEditor.busy()){toast('한글 입력을 마친 뒤 화면을 바꿔 주세요.');return;}
-  switchingWorkspace=true;suppressFollow=true;
-  try{
-    if(followFrame){cancelAnimationFrame(followFrame);followFrame=0;}
-    renderNow();
-    const selection=sourceSelection();
-    const records=navigationSnapshot.records;
-    const readPreview=!frame.parentElement.hidden&&(input.hidden||origin==='preview');
-    const preferred=previewEditor.enabled?previewEditor.readSelection():!input.hidden&&viewedPane==='source'?selection:null;
-    const anchor=(readPreview?previewViewportAnchor(previewDoc,records,previewEditor,preferred):null)||
-      (!input.hidden&&sourceViewportAnchor(input,selection))||{...selection,ratio:null};
-    lastEditTime=0;
-    viewControls.selectLayout(layout);
-    if(editing||previewEditor.enabled)previewEditor.toggle(editing);
-    input.setSelectionRange(Math.min(anchor.anchor,anchor.focus),Math.max(anchor.anchor,anchor.focus),anchor.focus<anchor.anchor?'backward':'forward');
-    if(!input.hidden)placeSourceAnchor(input,anchor.focus,anchor.ratio);
-    if(pane==='preview'&&!frame.parentElement.hidden){
-      lastPane=viewedPane='preview';
-      if(editing){
-        previewEditor.selection={anchor:anchor.anchor,focus:anchor.focus};
-        previewEditor.updateLive(false);
-        previewEditor.restoreSelection(false);
-        previewSelection(previewEditor.selection,navigationSnapshot.version);
-      }else previewDoc.querySelector('main').focus({preventScroll:true});
-    }else if(!input.hidden)input.focus({preventScroll:true});
-    if(!frame.parentElement.hidden)placePreviewAnchor(previewDoc,navigationSnapshot.records,previewEditor,anchor.focus,anchor.ratio);
-    sceneOutline.locate(anchor.focus);
-    updateWorkspaceButtons();
-  }finally{switchingWorkspace=false;}
-}
-$('#mode-source').onclick=()=>switchWorkspace('source',false,'source');
-$('#mode-live').onclick=()=>switchWorkspace('preview',true,'preview');
-$('#mode-reading').onclick=()=>switchWorkspace('preview',false,'preview');
-$('#mode-split').onclick=()=>switchWorkspace('split',previewEditor.enabled,previewEditor.enabled&&viewedPane==='preview'?'preview':'source');
-$('#preview-edit').onclick=()=>switchWorkspace(input.hidden?'preview':'split',!previewEditor.enabled,'preview',frame.parentElement.hidden?'source':'preview');
-input.addEventListener('focus',()=>{lastPane=viewedPane='source';previewEditor.clearSelection();});
-for(const type of ['pointerdown','wheel','touchmove']){
-  input.addEventListener(type,()=>{viewedPane='source';},{passive:true});
-  previewDoc.addEventListener(type,()=>{viewedPane='preview';},{passive:true});
-}
+$('#preview-edit').onclick=()=>{
+  if(composing)return;
+  if(!previewEditor.toggle(!previewEditor.enabled))return;
+  if(previewEditor.enabled){
+    if(frame.parentElement.hidden)viewControls.selectLayout('split');
+    focusPreviewAtSource();
+  }else restoreWorkFocus();
+  $('#preview-edit').setAttribute('aria-pressed',String(previewEditor.enabled));
+};
+document.addEventListener('pointerdown',()=>previewEditor.clearSelection());
+input.addEventListener('focus',()=>{lastPane='source';previewEditor.clearSelection();});
 installPreviewNavigation({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,isComposing:()=>composing||previewEditor.enabled||input.hidden,onNavigate:()=>{suppressFollow=true;}});
 input.addEventListener('beforeinput',event=>{
   suppressFollow=false;
@@ -400,7 +355,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)saveRecover
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
 sceneOutline=installSceneOutline({panel:$('#scene-panel'),button:$('#scenes'),previewDoc,onJump:jumpToScene,canJump:()=>!composing&&!previewEditor.busy()});
 installToolbarMenus($('#top-panel'),previewDoc);
-viewControls=installViewControls({doc:document,input,frame,isBusy:()=>composing||previewEditor.busy(),onLayout:layoutChanged});
+viewControls=installViewControls({doc:document,input,frame,isBusy:()=>composing||previewEditor.busy(),onLayout:layoutChanged,restoreFocus:restoreWorkFocus});
 for(const doc of [document,previewDoc])doc.addEventListener('compositionend',()=>queueMicrotask(()=>viewControls.flush()));
 resetHistory();syncSettings();renderNow();
 if(recoveryProblem)toast('기존 복구본을 읽지 못했습니다. 기존 데이터는 보존되어 있습니다.');else saveRecovery();

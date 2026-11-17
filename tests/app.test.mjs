@@ -86,7 +86,7 @@ test('preview movement updates source selection without taking focus or adding h
   const d=a.q('#preview').contentDocument,main=d.querySelector('main'),node=d.querySelector('.dialogue span').firstChild;
   main.focus();d.getSelection().setBaseAndExtent(node,2,node,2);d.dispatchEvent(new d.defaultView.Event('selectionchange'));await a.flush();
   assert.equal(a.input.selectionEnd,6);assert.notEqual(a.w.document.activeElement,a.input);
-  a.q('#mode-live').click();assert.equal(a.input.hidden,true);a.q('#mode-split').click();assert.equal(a.input.hidden,false);
+  a.q('#view').click();a.q('[data-layout="preview"]').click();assert.equal(a.input.hidden,true);a.q('#view').click();a.q('[data-layout="split"]').click();assert.equal(a.input.hidden,false);
   assert.equal(a.input.value,'@민서\n첫 대사\n둘째 대사');assert.deepEqual(a.errors,[]);
  }finally{a.dom.window.close();}
 });
@@ -130,27 +130,6 @@ test('scene search jumps to the matching source heading without changing the dra
     assert.equal(a.input.selectionStart,source.lastIndexOf('.복도'));
     assert.equal(a.input.value,source);
     assert.equal(panel.querySelector('[aria-current]').textContent,'3 복도');
-    assert.deepEqual(a.errors,[]);
-  }finally{a.w.close();}
-});
-
-test('single live mode keeps the source selection and can return to one or two panes',async()=>{
-  const a=await app();
-  try{
-    const source='첫 문단\n\n두 번째 **굵은** 문장\n\n마지막 문단';
-    a.edit(source);await a.flush();
-    a.q('#mode-source').click();
-    const start=source.indexOf('번째');
-    a.input.setSelectionRange(start,start+2,'backward');
-    a.q('#mode-live').click();
-    const main=a.q('#preview').contentDocument.querySelector('main');
-    assert.equal(a.input.hidden,true);
-    assert.equal(main.contentEditable,'true');
-    assert.equal(a.q('#mode-live').getAttribute('aria-pressed'),'true');
-    assert.deepEqual([a.input.selectionStart,a.input.selectionEnd,a.input.selectionDirection],[start,start+2,'backward']);
-    a.q('#mode-split').click();assert.equal(a.input.hidden,false);assert.equal(a.q('#preview').parentElement.hidden,false);
-    a.q('#mode-source').click();assert.equal(a.q('#preview').parentElement.hidden,true);
-    assert.equal(a.input.value,source);
     assert.deepEqual(a.errors,[]);
   }finally{a.w.close();}
 });

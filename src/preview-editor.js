@@ -63,10 +63,7 @@ export class PreviewEditor{
   full(){return this.enabled;}
   live(){return this.enabled&&this.getMode()!=='full';}
   busy(){return this.composing;}
-  toggle(enabled){
-    if(this.composing){this.notify('한글 입력을 마친 뒤 다시 실행해 주세요.');return false;}
-    this.enabled=enabled;this.selection=null;this.lastRestored=null;this.pendingLine=null;this.refresh();return true;
-  }
+  toggle(enabled){if(!this.finish())return false;this.enabled=enabled;this.selection=null;this.pendingLine=null;this.refresh();return true;}
   finish(){
     if(this.composing){this.notify('한글 입력을 마친 뒤 다시 실행해 주세요.');return false;}
     this.selection=null;this.pendingLine=null;this.refresh();return true;
