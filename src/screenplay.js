@@ -5,7 +5,7 @@ import {render,inlineTagsToHtml} from './engine/fountain_html_renderer.js';
 import themes from './engine/themes.js';
 import {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,mergeRuns,sliceRuns,groupElements} from './rich-text.js';
 export {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,groupElements};
-export const DEFAULT_SETTINGS={font:'Noto Serif KR',size:12,numbering:'n',txtNumbering:'S#n.',numberMode:'output',follow:true,hashScenes:false,sNumberScenes:false,numericScenes:false,autoNumbers:true,autoCharacters:true,boldCharacters:true,hideOutline:false,theme:'default',previewEditMode:'source',showNotes:false};
+export const DEFAULT_SETTINGS={font:'Noto Serif KR',size:12,numbering:'n',txtNumbering:'S#n.',numberMode:'output',hashScenes:false,sNumberScenes:false,numericScenes:false,autoNumbers:true,autoCharacters:true,boldCharacters:true,hideOutline:false,theme:'default',previewEditMode:'source',showNotes:false};
 export const FONT_OPTIONS=[]; // Kept only for compatibility with pre-v2 saved work.
 export const CONTINUATION_LABELS={
   en:{more:'(MORE)',continued:"(CONT'D)"},

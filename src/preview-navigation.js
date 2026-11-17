@@ -18,7 +18,8 @@ export function hitText(element,x,y){
       const r=doc.createRange(),end=part.index+part.segment.length;r.setStart(entry.node,part.index);r.setEnd(entry.node,end);
       for(const rect of r.getClientRects())if(contains(rect,x,y)){
         const right=x>=rect.left+rect.width/2;
-        return {index:entry.offset+(right?end-1:part.index),after:right};
+        const textIndex=right?end-1:part.index;
+        return {index:entry.offset+textIndex,textIndex,node:entry.node,after:right};
       }
     }
   }return null;
@@ -128,27 +129,6 @@ function mirrorStyle(input,mirror){
   return Object.fromEntries([...properties.map(key=>[key,css[key]]),...Object.entries({width,whiteSpace:wrap?'pre':'pre-wrap',overflowWrap:wrap?'normal':'break-word',position:'fixed',left:'-100000px',top:'0',visibility:'hidden',pointerEvents:'none',boxSizing:'border-box',border:'0',margin:'0'})]);
 }
 
-export function createSourceMeasure(input){
-  const doc=input.ownerDocument,mirror=doc.createElement('div'),node=doc.createTextNode(''),range=doc.createRange();
-  mirror.setAttribute('aria-hidden','true');
-  Object.assign(mirror.style,mirrorStyle(input));
-  mirror.append(node);doc.body.append(mirror);
-  let text=null,geometry='';
-  return {
-    prepare(){
-      const style=mirrorStyle(input),key=JSON.stringify(style);
-      if(key!==geometry){Object.assign(mirror.style,style);geometry=key;}
-      if(text!==input.value){text=input.value;node.data=text+'\u200b';}
-    },
-    rect(pos){
-      range.setStart(node,pos);range.setEnd(node,pos+1);
-      const base=mirror.getBoundingClientRect(),rect=range.getBoundingClientRect();
-      return {top:rect.top-base.top,bottom:rect.bottom-base.top,left:rect.left-base.left,right:rect.right-base.left};
-    },
-    destroy:()=>mirror.remove(),
-  };
-}
-
 export function revealCaret(input,pos,{center=false}={}){
   const doc=input.ownerDocument,mirror=doc.createElement('div'),marker=doc.createElement('span');
   mirror.setAttribute('aria-hidden','true');
@@ -167,20 +147,26 @@ export function revealCaret(input,pos,{center=false}={}){
   }finally{mirror.remove();}
 }
 
-export function installPreviewNavigation({doc,input,getSnapshot,edits,onNavigate,isComposing=()=>false}){
+export function installPreviewNavigation({doc,input,getSnapshot,edits,onNavigate,isComposing=()=>false,getNodeMaps=()=>null}){
   let down=null;
   doc.addEventListener('pointerdown',event=>{
-    down=null;if(event.button!==0||isComposing())return;
+    down=null;if(!event.ctrlKey||event.button!==0||isComposing())return;
     const element=event.target.closest?.('[data-token]');if(!element)return;
     const snapshot=getSnapshot(),record=snapshot?.records.get(element.dataset.token);
-    const pos=mappedPosition(record,hitText(element,event.clientX,event.clientY));
+    const hit=record&&hitText(element,event.clientX,event.clientY);
+    if(!hit)return;
+    const nodeMaps=getNodeMaps();
+    let pos;
+    if(!nodeMaps)pos=mappedPosition(record,hit);
+    else if(hit.node.parentElement.closest('.preview-number'))pos=record.sourceStart;
+    else pos=nodeMaps.get(hit.node)?.[hit.textIndex]?.[hit.after?1:0]??null;
     if(pos!==null)down={x:event.clientX,y:event.clientY,pos,version:snapshot.version};
   });
   doc.addEventListener('pointercancel',()=>down=null);
   doc.addEventListener('click',event=>{
     const start=down;down=null;
-    if(!start||event.button!==0||event.detail>1||isComposing()||Math.hypot(event.clientX-start.x,event.clientY-start.y)>3||!doc.getSelection()?.isCollapsed)return;
+    if(!start||!event.ctrlKey||event.button!==0||event.detail>1||isComposing()||Math.hypot(event.clientX-start.x,event.clientY-start.y)>3||!doc.getSelection()?.isCollapsed)return;
     const pos=edits.map(start.pos,start.version);if(pos===null)return;
-    onNavigate();input.focus({preventScroll:true});input.setSelectionRange(pos,pos);revealCaret(input,pos);
+    event.preventDefault();onNavigate(pos);input.focus({preventScroll:true});input.setSelectionRange(pos,pos);revealCaret(input,pos);
   });
 }

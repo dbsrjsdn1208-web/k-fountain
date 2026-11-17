@@ -4,8 +4,7 @@ import './style.css';
 import {DEFAULT_SETTINGS,escapeHTML as esc,parseScreenplay,renderPreview,previewCSS,exportReadableText} from './screenplay.js';
 import {characterCueOnEnter,cleanNames,normalizeText,normalizeNewlines,mapSelection,toggleMarkup,clipboardFountain,migrateLegacy} from './text-tools.js';
 import {FileSession,handleDB} from './file-store.js';
-import {SourceEdits,revealCaret,visiblePreviewAnchor,previewViewportAnchor,renderedPositionRect} from './preview-navigation.js';
-import {installScrollSync} from './scroll-sync.js';
+import {SourceEdits,installPreviewNavigation,revealCaret,visiblePreviewAnchor,previewViewportAnchor,renderedPositionRect} from './preview-navigation.js';
 import {PreviewEditor,editorCSS} from './preview-editor.js';
 import {installViewControls} from './view-controls.js';
 import {installSceneOutline,installToolbarMenus} from './workspace-ui.js';
@@ -17,6 +16,7 @@ function validate(value){
   if(value?.version===1)value=migrateLegacy(value);
   if(value?.version!==2||typeof value.text!=='string'||!Array.isArray(value.names))throw Error('읽을 수 없는 원고입니다.');
   const settings={...DEFAULT_SETTINGS,...value.settings,hashScenes:false,sNumberScenes:false,numericScenes:false,numbering:'n'};
+  delete settings.follow;
   settings.font=String(settings.font||DEFAULT_SETTINGS.font).slice(0,150);
   settings.size=[10,11,12,13,14].includes(+settings.size)?+settings.size:12;
   settings.numberMode=settings.numberMode==='source'?'source':'output';
@@ -32,7 +32,7 @@ try{const saved=localStorage.getItem(STORAGE)||localStorage.getItem(LEGACY);if(s
 const $=s=>document.querySelector(s),files=new FileSession();
 let elements,framePending=0,composing=false,dirty=false,previewText=null,previewKey='',toastTimer,recoveryTimer,revision=0;
 let history=[],historyIndex=-1,lastEditTime=0,lastEditType='',installPrompt;
-let previewEditor,viewControls,sceneOutline,outlineVersion,lastPane='source',lastPreviewSelection=null,scrollSync;
+let previewEditor,viewControls,sceneOutline,outlineVersion,lastPane='source',lastPreviewSelection=null;
 let typewriterFrame=0;
 let pausedPreview=null;
 document.querySelector('#app').innerHTML=`
@@ -95,7 +95,7 @@ document.querySelector('#app').innerHTML=`
 <div class="setting-row"><label>글자 크기<select id="size">${[10,11,12,13,14].map(n=>`<option value="${n}">${n} pt</option>`).join('')}</select></label><label>출력 테마<select id="theme"><option value="default">Default</option><option value="cjk">CJK</option><option value="dark">Dark</option><option value="ocean">Ocean</option><option value="colorful">Colorful</option></select></label></div>
 <label>장면 번호 자동<select id="number-mode"><option value="output">출력만 갱신 — 원고 유지</option><option value="source">원고에도 반영 — #1#, #2#</option><option value="off">끄기 — 직접 쓴 번호 유지</option></select></label><p class="hint">장면은 .장소 또는 INT. / EXT.로 시작합니다. #는 Fountain의 섹션 기호입니다. 원고 반영을 끄더라도 이미 쓴 번호는 지워지지 않습니다.</p>
 <label class="check"><input id="auto-characters" type="checkbox">등록된 인물명에 @ 자동 추가</label><label>등록 인물<textarea id="names" rows="5" placeholder="한 줄에 한 명씩&#10;민서&#10;(인물)"></textarea></label><p class="hint">민서 (전화), (민서), (인물), 동시 대사 ^를 지원합니다. 지문과 대사 중 지시문은 그대로 둡니다.</p>
-<label class="check"><input id="bold-characters" type="checkbox">인물명 굵게 출력</label><label class="check"><input id="show-notes" type="checkbox">미리보기에 [[메모]] 표시</label><p class="hint">인쇄·PDF·DOCX·읽기용 TXT에는 항상 제외합니다. 숨긴 메모는 원본에서 수정하세요.</p><label class="check"><input id="follow" type="checkbox">양쪽 화면 스크롤 동기화</label><label class="check"><input id="hide-outline" type="checkbox">출력에서 섹션·시놉시스 숨기기</label>
+<label class="check"><input id="bold-characters" type="checkbox">인물명 굵게 출력</label><label class="check"><input id="show-notes" type="checkbox">미리보기에 [[메모]] 표시</label><p class="hint">인쇄·PDF·DOCX·읽기용 TXT에는 항상 제외합니다. 숨긴 메모는 원본에서 수정하세요.</p><label class="check"><input id="hide-outline" type="checkbox">출력에서 섹션·시놉시스 숨기기</label>
 <label>PDF 대사 계속 표기<select id="continuation-language"><option value="en">영문 (MORE) / (CONT'D)</option><option value="ko">한글 (계속) / (이어서)</option></select></label><p class="hint">페이지를 넘겨 이어지는 대사에 자동으로 넣습니다.</p>
 <details><summary>사용 방법</summary><p>.장소 / 시간 → 장면<br>@인물 (전화) → 인물명<br>(작게) → 대사 지시문<br>두 번째 인물명 뒤 ^ → 동시 대사<br>=== → 페이지 나누기<br>**굵게** · *기울임* · _밑줄_<br>Ctrl+S → 같은 파일에 저장<br>Ctrl+Shift+S → 다른 이름으로 저장</p><p>구글 독스에서 붙여넣은 강조는 Fountain 기호로 바뀝니다. PDF는 인쇄 창에서 PDF 저장을 선택하세요. DOCX는 구글 독스에서 열어 편집할 수 있습니다.</p><p id="save-support"></p></details></dialog>
 <dialog id="txt-dialog"><div class="dialog-heading"><h2>TXT 내보내기</h2><button data-close="txt-dialog">닫기</button></div><label>장면 번호 표시<select id="txt-numbering"><option value="S#n.">S#1. 장소</option><option value="S#n">S#1 장소</option><option value="n.">1. 장소</option><option value="n">1 장소</option></select></label><p class="hint">Fountain 기호를 뺀 읽기용 대본입니다. 원본 파일은 변경하지 않습니다.</p><button id="export-txt">TXT 저장</button></dialog>
@@ -130,7 +130,7 @@ function normalize(){
   const previous=input.value,next=normalizeText(previous,[],{...state.settings,autoCharacters:false});
   if(next!==previous){const [start,end]=mapSelection(previous,next,input.selectionStart,input.selectionEnd),scroll=input.scrollTop;input.value=next;input.setSelectionRange(start,end);input.scrollTop=scroll;}
 }
-function changed(){scrollSync?.quiet();sourceEdits.record(input.value);state.text=input.value;revision++;dirty=files.lastSaved!==input.value;updateStatus();queueRender();queueRecovery();queueTypewriter();}
+function changed(){sourceEdits.record(input.value);state.text=input.value;revision++;dirty=files.lastSaved!==input.value;updateStatus();queueRender();queueRecovery();queueTypewriter();}
 function updateStatus(){const name=files.handle?.name||state.title+'.fountain';$('#file-status').textContent=files.handle?`${name} · ${dirty?'변경됨':'파일에 저장됨'}`:files.lastSaved!==null?`${name} · ${dirty?'변경됨':'다운로드됨'}`:'파일 저장 위치 미지정';}
 function queueRecovery(){clearTimeout(recoveryTimer);recoveryTimer=setTimeout(saveRecovery,350);}
 function saveRecovery(){try{state.text=input.value;localStorage.setItem(STORAGE,JSON.stringify(state));$('#recovery-status').textContent='임시 복구본 보관됨';return true;}catch{$('#recovery-status').textContent='임시 복구본 저장 실패';return false;}}
@@ -143,7 +143,6 @@ function renderNow(){
   if(previewEditor?.busy())return;
   const key=JSON.stringify([state.names,state.settings]);
   if(input.value!==previewText||key!==previewKey){
-    scrollSync?.quiet();
     const anchor=document.activeElement===frame?previewEditor?.captureBlockAnchor():null;
     elements=parseScreenplay(input.value,state.names,state.settings);
     const scroll=frame.contentWindow.scrollY,html=renderPreview(elements,{showNotes:state.settings.showNotes}),main=previewDoc.querySelector('main');
@@ -164,7 +163,7 @@ function previewSelection(selection,version){
   const anchor=sourceEdits.map(selection.anchor,version),focus=sourceEdits.map(selection.focus,version);
   if(anchor===null||focus===null)return;
   lastPreviewSelection={anchor,focus,version:sourceEdits.version};lastPane='preview';
-  scrollSync?.quiet('source');input.setSelectionRange(Math.min(anchor,focus),Math.max(anchor,focus),focus<anchor?'backward':'forward');
+  input.setSelectionRange(Math.min(anchor,focus),Math.max(anchor,focus),focus<anchor?'backward':'forward');
   sceneOutline.locate(focus);
 }
 function restoreWorkFocus(){
@@ -202,7 +201,6 @@ function pausedPreviewSelection(selection){
 }
 function typewriterActive(){return input.parentElement.classList.contains('typewriter-active');}
 function centerSourceCaret(){
-  scrollSync?.quiet('source');
   const pos=input.selectionDirection==='backward'?input.selectionStart:input.selectionEnd;
   revealCaret(input,pos,{center:true});
 }
@@ -214,7 +212,6 @@ function queueTypewriter(){
   });
 }
 function layoutChanged(){
-  scrollSync?.quiet();
   requestAnimationFrame(()=>{
     if(composing||previewEditor.busy())return;
     if(input.hidden&&document.activeElement===input){lastPane='preview';restoreWorkFocus();}
@@ -225,13 +222,11 @@ function layoutChanged(){
   });
 }
 previewEditor=new PreviewEditor({doc:previewDoc,input,edits:sourceEdits,getSnapshot:()=>navigationSnapshot,getMode:()=>state.settings.previewEditMode||'source',getShowNotes:()=>state.settings.showNotes===true,onSelection:previewSelection,
-  onRelayout:()=>scrollSync?.quiet('preview'),
   cueAt:(text,pos)=>state.settings.autoCharacters?characterCueOnEnter(text,pos,state.names):null,
   apply:(text,start,end,type,auto)=>{input.value=text;input.setSelectionRange(start,end);if(auto)normalize();record(type);changed();},
   remember:()=>{if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();},undo:restoreHistory,
   refresh:()=>{previewText=null;renderNow();},notify:toast,save:saveFile});
 function jumpToScene(scene){
-  scrollSync?.quiet();
   const pos=sourceEdits.map(scene.pos,outlineVersion);
   if(pos===null){renderNow();return;}
   renderNow();
@@ -249,7 +244,6 @@ function jumpToScene(scene){
 }
 $('#preview-edit').onclick=()=>{
   if(composing||previewEditor.busy()){toast('한글 입력을 마친 뒤 화면을 바꿔 주세요.');return;}
-  scrollSync?.quiet();
   renderNow();
   lastEditTime=0;
   const hidden=frame.parentElement.hidden,win=frame.contentWindow;
@@ -291,9 +285,12 @@ $('#preview-edit').onclick=()=>{
   $('#preview-edit').setAttribute('aria-pressed',String(previewEditor.enabled));
 };
 input.addEventListener('focus',()=>{lastPane='source';previewEditor.clearSelection();queueTypewriter();});
-scrollSync=installScrollSync({input,frame,getSnapshot:()=>navigationSnapshot,edits:sourceEdits,
-  enabled:()=>state.settings.follow&&!input.hidden&&!frame.parentElement.hidden&&!composing&&!previewEditor.busy(),
-  getEditor:()=>previewEditor.enabled?previewEditor:null});
+installPreviewNavigation({doc:previewDoc,input,getSnapshot:()=>navigationSnapshot,edits:sourceEdits,
+  isComposing:()=>composing||previewEditor.busy(),getNodeMaps:()=>previewEditor.enabled?previewEditor.nodeMaps:null,
+  onNavigate:pos=>{
+    if(input.hidden)viewControls.selectLayout('split');
+    sceneOutline.locate(pos);
+  }});
 input.addEventListener('beforeinput',event=>{
   if(event.inputType==='historyUndo'||event.inputType==='historyRedo'){event.preventDefault();restoreHistory(event.inputType==='historyUndo'?-1:1);return;}
   if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();
@@ -366,7 +363,7 @@ function syncSettings(){
   $('#continuation-language').value=state.settings.continuationLanguage||'en';
   $('#font').value=state.settings.font;$('#size').value=state.settings.size;$('#theme').value=state.settings.theme;
   $('#number-mode').value=state.settings.autoNumbers?state.settings.numberMode:'off';$('#txt-numbering').value=state.settings.txtNumbering;$('#names').value=state.names.join('\n');
-  for(const [id,key]of Object.entries({'auto-characters':'autoCharacters','bold-characters':'boldCharacters',follow:'follow','hide-outline':'hideOutline','show-notes':'showNotes'}))$('#'+id).checked=state.settings[key];
+  for(const [id,key]of Object.entries({'auto-characters':'autoCharacters','bold-characters':'boldCharacters','hide-outline':'hideOutline','show-notes':'showNotes'}))$('#'+id).checked=state.settings[key];
 }
 function settingChanged(normalizeSource=false){if(normalizeSource){normalize();record('settings');}changed();}
 $('#settings').onclick=()=>{syncSettings();$('#settings-dialog').showModal();};
@@ -379,7 +376,7 @@ $('#continuation-language').onchange=e=>{state.settings.continuationLanguage=e.t
 $('#theme').onchange=e=>{state.settings.theme=e.target.value;settingChanged();};
 $('#number-mode').onchange=e=>{state.settings.autoNumbers=e.target.value!=='off';state.settings.numberMode=e.target.value==='source'?'source':'output';settingChanged(true);};
 $('#names').oninput=e=>{state.names=cleanNames(e.target.value);settingChanged();};
-for(const [id,key]of Object.entries({'auto-characters':'autoCharacters','bold-characters':'boldCharacters',follow:'follow','hide-outline':'hideOutline','show-notes':'showNotes'}))$('#'+id).onchange=e=>{state.settings[key]=e.target.checked;settingChanged();};
+for(const [id,key]of Object.entries({'auto-characters':'autoCharacters','bold-characters':'boldCharacters','hide-outline':'hideOutline','show-notes':'showNotes'}))$('#'+id).onchange=e=>{state.settings[key]=e.target.checked;settingChanged();};
 $('#save-support').textContent=files.supported?'처음에 저장 위치를 선택하면 Ctrl+S로 같은 파일에 저장합니다.':'이 브라우저는 파일 다운로드만 지원합니다. 같은 파일에 저장하려면 Chrome·Edge에서 여세요.';
 async function saveExport(blob,extension){
   if(window.showSaveFilePicker){const handle=await window.showSaveFilePicker({suggestedName:filename()+'.'+extension,id:'k-fountain-export',types:[{description:extension.toUpperCase(),accept:{'text/plain':['.txt']}}]});const writable=await handle.createWritable();try{await writable.write(blob);await writable.close();}catch(e){try{await writable.abort();}catch{}throw e;}}

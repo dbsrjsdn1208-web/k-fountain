@@ -49,8 +49,8 @@ main.preview-blank-active{caret-color:transparent;}
 `;
 
 export class PreviewEditor{
-  constructor({doc,input,getSnapshot,edits,getMode,getShowNotes=()=>false,onSelection=()=>{},onRelayout=()=>{},cueAt=()=>null,apply,remember,undo,refresh,notify,save}){
-    Object.assign(this,{doc,input,getSnapshot,edits,getMode,getShowNotes,onSelection,onRelayout,cueAt,apply,remember,undo,refresh,notify,save});
+  constructor({doc,input,getSnapshot,edits,getMode,getShowNotes=()=>false,onSelection=()=>{},cueAt=()=>null,apply,remember,undo,refresh,notify,save}){
+    Object.assign(this,{doc,input,getSnapshot,edits,getMode,getShowNotes,onSelection,cueAt,apply,remember,undo,refresh,notify,save});
     this.main=doc.querySelector('main');this.enabled=false;this.composing=false;this.selection=null;this.points=[];this.pendingLine=null;
     this.blankCaret=doc.createElement('div');this.blankCaret.id='preview-blank-caret';this.blankCaret.hidden=true;
     this.blankCaret.setAttribute('aria-hidden','true');doc.body.append(this.blankCaret);
@@ -209,7 +209,7 @@ export class PreviewEditor{
         const el=this.doc.createElement('p');el.className='preview-slot';el.dataset.insertion=source.length;el.textContent='​';this.main.append(el);
         this.nodeMaps.set(el.firstChild,[[source.length,source.length]]);this.points.push({node:el.firstChild,offset:0,pos:source.length});
       }
-      if(restore&&this.selection){this.onRelayout();this.restoreSelection(false);const after=this.caretRect();if(before?.height&&after?.height&&before.top>=0&&before.bottom<=win.innerHeight)win.scrollTo(0,Math.max(0,scroll+after.top-before.top));else this.revealCaret();}
+      if(restore&&this.selection){this.restoreSelection(false);const after=this.caretRect();if(before?.height&&after?.height&&before.top>=0&&before.bottom<=win.innerHeight)win.scrollTo(0,Math.max(0,scroll+after.top-before.top));else this.revealCaret();}
     }
     this.updatingLive=false;
   }

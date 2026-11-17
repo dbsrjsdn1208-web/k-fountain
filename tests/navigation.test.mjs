@@ -94,7 +94,7 @@ function gestures(){
   const original=doc.createRange.bind(doc);doc.createRange=()=>{const r=original();r.getClientRects=()=>[{left:r.startOffset*10,right:(r.endOffset||4)*10,top:10,bottom:30,width:((r.endOffset||4)-r.startOffset)*10,height:20}];return r;};
   const edits=new SourceEdits(input.value),record={text:input.value,map:[[0,1],[1,2],[2,3],[3,4]]};let navigated=0;
   installPreviewNavigation({doc,input,edits,getSnapshot:()=>({version:0,records:new Map([['0',record]])}),onNavigate:()=>navigated++});
-  function event(type,x,y,detail=1){el.dispatchEvent(new w.MouseEvent(type,{bubbles:true,clientX:x,clientY:y,button:0,detail}));}
+  function event(type,x,y,detail=1,ctrlKey=true){el.dispatchEvent(new w.MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,button:0,detail,ctrlKey}));}
   return {dom,doc,input,el,event,get navigated(){return navigated;}};
 }
 test('glyph hit testing excludes paragraph margins and avoids splitting surrogate pairs',()=>{
@@ -102,4 +102,14 @@ test('glyph hit testing excludes paragraph margins and avoids splitting surrogat
 });
 test('dragging and double clicking preview text do not transfer focus or alter source',()=>{
   const g=gestures();g.event('pointerdown',5,20);g.event('click',30,20);assert.equal(g.navigated,0);g.event('pointerdown',5,20);g.event('click',5,20,2);assert.equal(g.navigated,0);assert.equal(g.input.value,'가😊나');g.dom.window.close();
+});
+test('only a Ctrl-click on a glyph moves the source caret, including after an emoji',()=>{
+  const g=gestures();g.input.setSelectionRange(0,0);
+  for(const type of ['pointerdown','click'])g.event(type,28,20,1,false);
+  assert.equal(g.navigated,0);assert.equal(g.input.selectionStart,0);
+  for(const type of ['pointerdown','click'])g.event(type,70,20);
+  assert.equal(g.navigated,0);
+  for(const type of ['pointerdown','click'])g.event(type,28,20);
+  assert.equal(g.navigated,1);assert.equal(g.input.selectionStart,3);
+  assert.equal(g.doc.activeElement,g.input);assert.equal(g.input.value,'가😊나');g.dom.window.close();
 });
