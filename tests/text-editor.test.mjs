@@ -80,6 +80,15 @@ test('Enter recognizes equivalent Hangul without rewriting letters and ignores d
 test('a registered parenthetical inside dialogue is still a direction',()=>{
   const text='@민서\n(인물)\n대사';assert.equal(normalizeText(text,['민서','(인물)'],DEFAULT_SETTINGS),text);
 });
+test('Fountain save restores registered cues but preserves notes, dialogue, and existing @',()=>{
+  const text='Title:\n    석필\n\n.방\n\n@민서\n대사\n  \n석필\n\n[[닫힌 메모]] [[\n\n석필\n\n]]\n\n  석필 (전화)  \n대사';
+  const names=['석필','민서'],options={restoreCharacterCues:true};
+  const settings={...DEFAULT_SETTINGS,numberMode:'source'};
+  const saved=normalizeText(text,names,settings,options);
+  assert.equal(saved,text.replace('.방','.방 #1#').replace('  석필 (전화)  ','@석필 (전화)'));
+  assert.equal(normalizeText(saved,names,settings,options),saved);
+  assert.equal(normalizeText(text,names,{...DEFAULT_SETTINGS,autoCharacters:false},options),text);
+});
 test('legacy migration preserves old marks, font and scenes without changing genuine sections',()=>{
   const old={version:1,title:'작품',names:['민서'],settings:{hashScenes:true,sNumberScenes:true,font:'바탕'},doc:plainTextDoc('# 장소\n\n민서\n대사')};
   old.doc.content[3].content[0].marks=[{type:'bold'}];const migrated=migrateLegacy(old);

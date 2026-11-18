@@ -3,7 +3,7 @@
 import {parse,TokenType} from './engine/fountain_parser.js';
 import {render,inlineTagsToHtml} from './engine/fountain_html_renderer.js';
 import themes from './engine/themes.js';
-import {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,mergeRuns,sliceRuns,groupElements} from './rich-text.js';
+import {documentLines,matchCharacter,registeredCue,matchScene,sceneLabel,escapeHTML,mergeRuns,sliceRuns,groupElements} from './rich-text.js';
 export {documentLines,matchCharacter,matchScene,sceneLabel,escapeHTML,groupElements};
 export const DEFAULT_SETTINGS={font:'Noto Serif KR',size:12,numbering:'n',txtNumbering:'S#n.',numberMode:'output',hashScenes:false,sNumberScenes:false,numericScenes:false,autoNumbers:true,autoCharacters:true,boldCharacters:true,hideOutline:false,theme:'default',previewEditMode:'source',showNotes:false};
 export const FONT_OPTIONS=[]; // Kept only for compatibility with pre-v2 saved work.
@@ -32,18 +32,24 @@ export function htmlRuns(html){
   return mergeRuns(runs);
 }
 export function inlineRuns(runs){return htmlRuns(inlineTagsToHtml(escapeHTML(runs.map(r=>r.text).join(''))));}
-export function prepareSource(doc,names,settings){
+export function prepareSource(doc,names,settings,{restoreCharacterCues=false}={}){
   const cfg={...DEFAULT_SETTINGS,...settings};
   const plain=typeof doc==='string';
-  let inBoneyard=false,inNote=false,inTitle=false,bodyStarted=false;
+  let commentEnd=null,inTitle=false,bodyStarted=false;
   const sourceLines=documentLines(typeof doc==='string'?plainTextDoc(doc):doc);
   return sourceLines.map((line,index)=>{
     let text=fountainRuns(line.runs);
     const raw=line.text;
-    const wasComment=inBoneyard||inNote;
-    if(raw.includes('/*'))inBoneyard=true;if(raw.includes('*/'))inBoneyard=false;
-    if(raw.includes('[['))inNote=true;if(raw.includes(']]'))inNote=false;
-    if(wasComment||inBoneyard||inNote||raw.includes('/*')||raw.includes('[['))return text;
+    let hasComment=commentEnd!==null;
+    for(const [delimiter] of raw.matchAll(/\/\*|\*\/|\[\[|\]\]/g)){
+      if(commentEnd!==null){
+        if(delimiter===commentEnd)commentEnd=null;
+      }else if(delimiter==='/*'||delimiter==='[['){
+        commentEnd=delimiter==='/*'?'*/':']]';
+        hasComment=true;
+      }
+    }
+    if(hasComment)return text;
     if(!bodyStarted&&!inTitle&&/^(?:title|credit|author[s]?|source|notes|draft date|date|contact|copyright):/i.test(raw.trim()))inTitle=true;
     if(inTitle){if(!raw.trim()){inTitle=false;bodyStarted=true;}return text;}
     if(raw.trim())bodyStarted=true;
@@ -52,12 +58,15 @@ export function prepareSource(doc,names,settings){
     const numeric=cfg.numericScenes&&/^\d+\.\s+/.test(raw.trim());
     const scene=(hash||sn||numeric)?matchScene(raw):null;
     if(scene)text='.'+fountainRuns(sliceRuns(line.runs,scene.start,scene.end));
-    // Only old rich-text backups need implicit cues converted during migration.
-    // A Fountain source string already records the user's choice to keep or remove @.
     if(!plain){
       const cuePosition=index===0||!sourceLines[index-1].text.trim();
       const char=matchCharacter(raw,cfg.autoCharacters&&cuePosition?names:[]);
       if(char){const start=raw.indexOf(raw.trim())+(char.explicit?1:0),end=raw.replace(/\s*\^\s*$/,'').trimEnd().length;text='@'+fountainRuns(sliceRuns(line.runs,start,end))+(char.dual?' ^':'');}
+    }
+    // Preview respects the literal source. The Fountain file may restore cues on save.
+    if(plain&&restoreCharacterCues&&cfg.autoCharacters&&!scene){
+      const previous=sourceLines[index-1]?.text??'';
+      if(!previous.trim()&&previous!=='  ')text=registeredCue(raw,names)??text;
     }
     return text;
   }).join('\n');

@@ -1,4 +1,5 @@
-import {prepareSource,fountainRuns,DEFAULT_SETTINGS,numberSceneLine,matchCharacter} from './screenplay.js';
+import {prepareSource,fountainRuns,DEFAULT_SETTINGS,numberSceneLine} from './screenplay.js';
+import {registeredCue} from './rich-text.js';
 import {parse} from './engine/fountain_parser.js';
 
 export const normalizeNewlines=s=>s.replace(/\r\n?/g,'\n');
@@ -12,20 +13,18 @@ export function characterCueOnEnter(text,position,names){
   const previousStart=start>1?text.lastIndexOf('\n',start-2)+1:0;
   const previous=text.slice(previousStart,start-1).replace(/\r$/,'');
   if(start&&(previous.trim()||previous==='  '))return null;
-  const line=text.slice(start,end).trim();
-  const cue=matchCharacter(line.normalize('NFC'),names.map(name=>name.normalize('NFC')));
-  if(!cue||cue.explicit||/^[.!#>~=]/.test(line))return null;
+  const cue=registeredCue(text.slice(start,end),names);
+  if(cue===null)return null;
   const excluded=/\/\*[\s\S]*?(?:\*\/|$)|\[\[[\s\S]*?(?:\]\]|$)/g;
   for(const match of text.slice(0,position).matchAll(excluded)){
     if(match.index+match[0].length>start)return null;
   }
-  // Padding around a converted cue can make Fountain parse it as an action.
-  const insert='@'+line.replace(/\s{2,}\^$/,' ^')+'\n';
-  return {from:start,to:end,insert};
+  return {from:start,to:end,insert:cue+'\n'};
 }
 
-export function normalizeText(text,names,settings){
-  const cfg={...DEFAULT_SETTINGS,...settings},source=prepareSource(text,names,cfg);
+export function normalizeText(text,names,settings,{restoreCharacterCues=false}={}){
+  const cfg={...DEFAULT_SETTINGS,...settings};
+  const source=prepareSource(text,names,cfg,{restoreCharacterCues});
   if(!cfg.autoNumbers||cfg.numberMode!=='source')return source;
   const lines=source.split('\n');let number=0;
   for(const token of parse(source).tokens)if(token.type==='scene_heading')lines[token.sourceLine]=numberSceneLine(lines[token.sourceLine],++number);

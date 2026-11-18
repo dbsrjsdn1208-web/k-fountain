@@ -45,6 +45,17 @@ export function matchCharacter(text,names) {
   if(!name || (!explicit && !names.includes(name))) return null;
   return {name,extension:match[2].trim(),dual,explicit,label:clean};
 }
+
+// Recognize a new cue without changing the spelling of the registered name.
+export function registeredCue(text,names) {
+  const line=text.trim();
+  if(!names.length||/^[.@!#>~=]/.test(line))return null;
+  const cue=matchCharacter(line.normalize('NFC'),names.map(name=>name.normalize('NFC')));
+  if(!cue)return null;
+  // Extra padding can make Fountain interpret this line as action.
+  return '@'+line.replace(/\s{2,}\^$/,' ^');
+}
+
 export function matchScene(text) {
   const t=text.trim();
   // Parse prefixes separately so an unfinished S#23 cannot backtrack into scene 2, title 3.

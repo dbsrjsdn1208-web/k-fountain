@@ -348,7 +348,7 @@ async function saveFile(as=false){
   if(files.busy){toast('저장이 진행 중입니다. 완료 후 다시 시도해 주세요.');return false;}
   if(!previewEditor.finish())return false;
   if(composing){toast('한글 입력을 마친 뒤 저장해 주세요.');return false;}
-  const source=input.value,text=normalizeText(source,state.names,state.settings);
+  const source=input.value,text=normalizeText(source,state.names,state.settings,{restoreCharacterCues:true});
   try{
     if(files.supported){await files.save(text,filename()+'.fountain',as||!!files.handle&&state.title!==files.handle.name.replace(/\.fountain$/i,''),source);state.title=files.handle.name.replace(/\.fountain$/i,'');$('#title').value=state.title;handleDB('put',files.handle).catch(()=>{});}
     else{download(text,filename()+'.fountain');files.lastSaved=source;toast('다운로드했습니다. 같은 파일 덮어쓰기는 Chrome·Edge에서 지원됩니다.');}

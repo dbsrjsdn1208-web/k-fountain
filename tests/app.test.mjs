@@ -28,7 +28,7 @@ test('textarea shortcuts, undo, selection and IME compose through actual app lis
     await a.flush();assert.deepEqual(a.errors,[]);
   }finally{a.dom.window.close();}
 });
-test('registered name with pasted padding converts on Enter and stays plain after @ is removed',async()=>{
+test('registered name converts on Enter and a removed @ is restored only in the saved file',async()=>{
   const a=await app();try{
     const names=a.q('#names');names.value='석필';names.dispatchEvent(new a.w.Event('input'));
     a.edit('  석필 (전화)  ');const pos=a.input.value.trimEnd().length;
@@ -42,7 +42,9 @@ test('registered name with pasted padding converts on Enter and stays plain afte
     const doc=a.q('#preview').contentDocument;assert.equal(doc.querySelector('.character').textContent,'석필 (전화)');
     a.edit('석필 (전화)\n안녕','deleteContentForward');await a.flush();
     assert.equal(doc.querySelector('.character'),null);
-    a.q('#save').click();await a.flush();assert.deepEqual(a.writes,['석필 (전화)\n안녕']);
+    a.q('#save').click();await a.flush();assert.deepEqual(a.writes,['@석필 (전화)\n안녕']);
+    assert.equal(a.input.value,'석필 (전화)\n안녕');
+    assert.equal(doc.querySelector('.character'),null);
   }finally{a.dom.window.close();}
 });
 test('settings apply live, source numbering keeps insertion caret and output mode preserves source',async()=>{
