@@ -60,6 +60,19 @@ export function renderedPositionRect(doc,records,pos,nodeMaps){
   return closest?characterRect(doc,closest.node,closest.i):null;
 }
 
+// Reading preview omits Fountain's paragraph separator lines. Their source
+// caret still belongs at the preceding paragraph boundary, not nowhere.
+export function previewPositionForSource(records,pos,source){
+  if(!Number.isInteger(pos)||pos<0||pos>source.length)return null;
+  const visible=[...records.values()].filter(r=>r.map.some(span=>span&&span[0]!==span[1]));
+  if(visible.some(r=>r.rawStart<=pos&&pos<=r.rawEnd))return pos;
+  const previous=visible.filter(r=>r.rawEnd<pos).sort((a,b)=>b.rawEnd-a.rawEnd)[0];
+  if(previous&&!source.slice(previous.rawEnd,pos).trim())return previous.rawEnd;
+  const next=visible.filter(r=>r.rawStart>pos).sort((a,b)=>a.rawStart-b.rawStart)[0];
+  if(next&&!source.slice(pos,next.rawStart).trim())return next.rawStart;
+  return null;
+}
+
 export function visiblePreviewAnchor(doc,records,selection){
   const height=doc.defaultView.innerHeight;
   const preferred=renderedPositionRect(doc,records,selection.focus);

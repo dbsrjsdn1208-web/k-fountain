@@ -4,7 +4,7 @@ import './style.css';
 import {DEFAULT_SETTINGS,escapeHTML as esc,parseScreenplay,renderPreview,previewCSS,exportReadableText} from './screenplay.js';
 import {characterCueOnEnter,cleanNames,normalizeText,normalizeNewlines,mapSelection,toggleMarkup,clipboardFountain,migrateLegacy} from './text-tools.js';
 import {FileSession,handleDB} from './file-store.js';
-import {SourceEdits,installPreviewNavigation,installSourceNavigation,revealCaret,visiblePreviewAnchor,previewViewportAnchor,renderedPositionRect} from './preview-navigation.js';
+import {SourceEdits,installPreviewNavigation,installSourceNavigation,revealCaret,visiblePreviewAnchor,previewViewportAnchor,renderedPositionRect,previewPositionForSource} from './preview-navigation.js';
 import {PreviewEditor,editorCSS} from './preview-editor.js';
 import {installViewControls} from './view-controls.js';
 import {installSceneOutline,installToolbarMenus} from './workspace-ui.js';
@@ -143,13 +143,12 @@ function renderNow(){
   if(previewEditor?.busy())return;
   const key=JSON.stringify([state.names,state.settings]);
   if(input.value!==previewText||key!==previewKey){
-    const anchor=document.activeElement===frame?previewEditor?.captureBlockAnchor():null;
     elements=parseScreenplay(input.value,state.names,state.settings);
     const scroll=frame.contentWindow.scrollY,html=renderPreview(elements,{showNotes:state.settings.showNotes}),main=previewDoc.querySelector('main');
     if(main.innerHTML!==html)main.innerHTML=html;
     navigationSnapshot={records:elements.navigation,version:sourceEdits.version};
     if(key!==previewKey){previewDoc.querySelector('#style').textContent=previewCSS(state.settings)+editorCSS;input.style.fontFamily=`${JSON.stringify(state.settings.font)},"Noto Serif KR",serif`;}
-    frame.contentWindow.scrollTo(0,scroll);previewEditor?.decorate(anchor);previewText=input.value;previewKey=key;
+    frame.contentWindow.scrollTo(0,scroll);previewEditor?.decorate();previewText=input.value;previewKey=key;
     outlineVersion=sourceEdits.version;
     const entries=elements.model.tokens.filter(token=>token.type==='scene_heading').map(token=>({
       pos:token.rawStart, title:elements[token.sourceLine]?.displayText||token.text,
@@ -295,11 +294,17 @@ installSourceNavigation({input,isComposing:()=>composing||previewEditor.busy(),o
   if(previewEditor.hiddenRanges().some(([from,to])=>from<=pos&&pos<to))return false;
   if(frame.parentElement.hidden)viewControls.selectLayout('split');
   renderNow();
-  const maps=previewEditor.enabled?previewEditor.nodeMaps:null;
-  const target=renderedPositionRect(previewDoc,navigationSnapshot.records,pos,maps);
-  if(!target?.height)return false;
-  if(previewEditor.enabled)focusPreviewAtSource();
+  if(previewEditor.enabled){
+    if(previewPositionForSource(navigationSnapshot.records,pos,input.value)===null&&!previewEditor.points.some(point=>point.pos===pos))return false;
+    previewEditor.selection={anchor:pos,focus:pos};
+    previewEditor.updateLive(false);
+    previewEditor.restoreSelection();
+  }
   else{
+    const mapped=previewPositionForSource(navigationSnapshot.records,pos,input.value);
+    if(mapped===null)return false;
+    const target=renderedPositionRect(previewDoc,navigationSnapshot.records,mapped);
+    if(!target?.height)return false;
     const win=frame.contentWindow;
     win.scrollBy(0,target.top-(win.innerHeight-target.height)/2);
   }

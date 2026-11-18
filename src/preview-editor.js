@@ -28,36 +28,27 @@ export function deletionRange(text,pos,backward){
 
 export const editorCSS=`
 main:focus{outline:none;}
-main.preview-writing{caret-color:currentColor;}
-main.preview-blank-active{caret-color:transparent;}
-#preview-blank-caret{position:fixed;width:1.5px;background:currentColor;pointer-events:none;z-index:1;animation:preview-caret-blink 1s step-end infinite;}
-@keyframes preview-caret-blink{50%{opacity:0;}}
-@media(prefers-reduced-motion:reduce){#preview-blank-caret{animation:none;}}
+main.preview-writing{outline:none;caret-color:currentColor;min-height:70vh;}
 .preview-raw{display:block;box-sizing:border-box;width:100%;min-height:3em;resize:none;font:inherit;line-height:1.5;white-space:pre-wrap;border:1px solid #3594cf;border-radius:3px;padding:8px;color:inherit;background:transparent;caret-color:currentColor;}
-.preview-slot{min-height:var(--default-line-height,1.5em);white-space:pre-wrap;margin:0;}
-.preview-slot>span{line-height:inherit;}
+.preview-slot{min-height:1.5em;white-space:pre-wrap;margin:0;}
+/* Completed paragraph separators replace the reading theme's 1em margin.
+   Keep the native line box/caret full-size; only its surrounding gap shrinks. */
+.preview-slot.preview-separator:not(.preview-hidden-slot){min-height:1em;height:1em;}
 .preview-number{user-select:none;}
 .preview-syntax{color:#77818d;}
 .preview-note{color:#77818d;font-weight:400;font-style:normal;text-decoration:none;white-space:pre-wrap;}
 .preview-hidden-slot{min-height:0;height:0;line-height:0;overflow:hidden;}
-.preview-page-break{height:0;position:relative;}
-.preview-page-break::before{content:'';position:absolute;inset-inline:0;top:0;border-top:1px dashed #ccd1d6;pointer-events:none;}
-.preview-page-break>span{position:absolute;inset-inline-start:0;top:0;}
+.preview-page-break{min-height:1.5em;border-top:1px dashed #ccd1d6;}
 .preview-writing [data-token]{white-space:pre-wrap;}
 .preview-writing:empty:before{content:'여기에 Fountain으로 작성하세요';opacity:.45;}
-@media print{#preview-blank-caret,.preview-slot,.preview-raw,.preview-syntax,.preview-note{display:none!important;}.preview-page-break{break-after:page;visibility:hidden;}[data-raw-hidden]{display:revert!important;}}
+@media screen{.preview-writing .action,.preview-writing .screen-heading,.preview-writing .transition{margin-top:0;margin-bottom:0;}.preview-writing .character{margin-top:0;}}
+@media print{.preview-slot,.preview-raw,.preview-syntax,.preview-note{display:none!important;}.preview-page-break{break-after:page;visibility:hidden;}[data-raw-hidden]{display:revert!important;}}
 `;
 
 export class PreviewEditor{
   constructor({doc,input,getSnapshot,edits,getMode,getShowNotes=()=>false,onSelection=()=>{},cueAt=()=>null,apply,remember,undo,refresh,notify,save}){
     Object.assign(this,{doc,input,getSnapshot,edits,getMode,getShowNotes,onSelection,cueAt,apply,remember,undo,refresh,notify,save});
     this.main=doc.querySelector('main');this.enabled=false;this.composing=false;this.selection=null;this.points=[];this.pendingLine=null;
-    this.blankCaret=doc.createElement('div');this.blankCaret.id='preview-blank-caret';this.blankCaret.hidden=true;
-    this.blankCaret.setAttribute('aria-hidden','true');doc.body.append(this.blankCaret);
-    this.main.addEventListener('blur',()=>this.hideBlankCaret());
-    const updateBlankCaret=()=>this.updateBlankCaret();
-    doc.defaultView.addEventListener('scroll',updateBlankCaret);
-    doc.defaultView.addEventListener('resize',updateBlankCaret);
     doc.addEventListener('click',e=>this.click(e));
     doc.addEventListener('pointerdown',()=>{this.lastRestored=null;this.dragging=true;});
     doc.addEventListener('pointerup',()=>{this.dragging=false;this.syncSelection();});
@@ -67,7 +58,7 @@ export class PreviewEditor{
     doc.addEventListener('cut',e=>this.cut(e));
     doc.addEventListener('drop',e=>{if(this.full()){e.preventDefault();this.insert(e.dataTransfer.getData('text/plain'),'insertFromDrop');}});
     doc.addEventListener('dragover',e=>{if(this.full())e.preventDefault();});
-    doc.addEventListener('compositionstart',e=>{if(!this.enabled)return;this.composing=true;this.hideBlankCaret();this.compositionSelection=this.full()?this.readSelection():null;this.compositionVersion=this.edits.version;});
+    doc.addEventListener('compositionstart',e=>{if(!this.enabled)return;this.composing=true;this.compositionSelection=this.full()?this.readSelection():null;this.compositionVersion=this.edits.version;});
     doc.addEventListener('compositionend',e=>{if(!this.enabled)return;this.composing=false;
       if(this.full()&&this.compositionSelection){this.selection=this.compositionSelection;if(e.data)this.insert(e.data,'composition',this.selection,this.compositionVersion);else this.refresh();this.compositionSelection=null;}
     });
@@ -78,9 +69,7 @@ export class PreviewEditor{
   busy(){return this.composing;}
   toggle(enabled,selection=null){
     if(this.composing){this.notify('한글 입력을 마친 뒤 다시 실행해 주세요.');return false;}
-    this.enabled=enabled;this.selection=selection;this.lastRestored=null;this.pendingLine=null;
-    this.refresh();
-    return true;
+    this.enabled=enabled;this.selection=selection;this.lastRestored=null;this.pendingLine=null;this.refresh();return true;
   }
   finish(){
     if(this.composing){this.notify('한글 입력을 마친 뒤 다시 실행해 주세요.');return false;}
@@ -96,43 +85,24 @@ export class PreviewEditor{
     }
   }
   // Rebuild only from the canonical rendered screenplay; never serialize arbitrary HTML.
-  decorate(anchor=null){
-    this.hideBlankCaret();
+  decorate(){
     this.main.classList.toggle('preview-writing',this.full());this.main.contentEditable=this.full()?'true':'false';
     this.main.setAttribute('aria-label',this.live()?'대본 라이브 프리뷰':this.full()?'대본 직접 편집':'대본 미리보기');
     this.main.setAttribute('role',this.full()?'textbox':'document');this.main.setAttribute('aria-multiline','true');
     this.main.spellcheck=false;
-    this.points=[];this.spans=[];this.nodeMaps=new WeakMap();
-    if(this.enabled)this.decorateLive(anchor);
-    else this.placeReadingSlots();
+    this.points=[];this.spans=[];this.nodeMaps=new WeakMap();if(!this.enabled)return;
+    this.decorateLive();
   }
   // Empty source lines continue the previous dialogue until a second newline.
-  placeSlot(el,pos,previous,next){
-    if(previous?.rec.rawEnd===pos-1&&['character','dialogue','parenthetical'].includes(previous.rec.type)){
+  placeSlot(el,pos,ranges){
+    const previous=ranges.findLast(b=>b.rec.rawEnd===pos-1);
+    const next=ranges.find(b=>b.rec.rawStart>=pos);
+    if(pos>0&&this.input.value[pos]==='\n')el.classList.add('preview-separator');
+    if(previous&&['character','dialogue','parenthetical'].includes(previous.rec.type)){
       el.classList.add('dialogue');previous.el.after(el);return;
     }
     if(next){let top=next.el;while(top.parentElement!==this.main)top=top.parentElement;top.before(el);}
     else this.main.append(el);
-  }
-  placeReadingSlots(){
-    const snapshot=this.getSnapshot(),source=this.input.value;
-    const records=[...this.main.querySelectorAll('[data-token]')].map(el=>({el,rec:snapshot.records.get(el.dataset.token)})).filter(block=>block.rec);
-    const notes=noteRanges(source);
-    this.visitGaps(records,(line,pos,previous,next)=>{
-      if(line||!source||notes.some(([a,b])=>pos>=a&&pos<b))return;
-      const el=this.doc.createElement('p');el.className='preview-slot';el.setAttribute('aria-hidden','true');
-      this.placeSlot(el,pos,previous,next);
-    });
-  }
-  visitGaps(blocks,visit){
-    const covered=blocks.slice().sort((a,b)=>a.rec.rawStart-b.rec.rawStart);
-    let pos=0,i=0;
-    for(const line of this.input.value.split('\n')){
-      while(i<covered.length&&covered[i].rec.rawEnd<=pos)i++;
-      const next=covered[i];
-      if(!next||next.rec.rawStart>pos)visit(line,pos,covered[i-1],next);
-      pos+=line.length+1;
-    }
   }
   hiddenRanges(){return noteRanges(this.input.value).filter(([a])=>this.input.value.startsWith('[[',a)?!this.getShowNotes():!this.live());}
   skipHidden(pos,backward){
@@ -141,47 +111,34 @@ export class PreviewEditor{
     return pos;
   }
 
-  decorateLive(anchor){
+  decorateLive(){
     const source=this.input.value,snap=this.getSnapshot();this.notes=noteRanges(source);this.liveBlocks=[];
     for(let el of this.main.querySelectorAll('[data-token]')){
       const rec=snap.records.get(el.dataset.token);if(!rec)continue;
-      if(el.matches('hr,br')){
-        const replacement=this.doc.createElement('p');
-        for(const a of el.attributes)replacement.setAttribute(a.name,a.value);
-        if(el.tagName==='HR'){
-          const style=this.doc.defaultView.getComputedStyle(el);
-          replacement.classList.add('preview-page-break');
-          replacement.style.marginBlockStart=style.marginTop;
-          replacement.style.marginBlockEnd=style.marginBottom;
-        }else replacement.classList.add('preview-slot');
-        el.replaceWith(replacement);el=replacement;
-      }
+      if(el.matches('hr,br')){const replacement=this.doc.createElement('p');for(const a of el.attributes)replacement.setAttribute(a.name,a.value);if(el.tagName==='HR')replacement.classList.add('preview-page-break');el.replaceWith(replacement);el=replacement;}
       const block=captureBlock(this.doc,el,rec);
       block.hidden=this.notes.some(([a,b])=>rec.rawStart>=a&&rec.rawEnd<=b);
       this.liveBlocks.push(block);
     }
-    this.visitGaps(this.liveBlocks,(line,pos,previous,next)=>{
+    const covered=this.liveBlocks.slice().sort((a,b)=>a.rec.rawStart-b.rec.rawStart);let pos=0;
+    for(const line of source.split('\n')){
+      if(!covered.some(b=>pos>=b.rec.rawStart&&pos<b.rec.rawEnd)){
         const el=this.doc.createElement('p');el.className='preview-slot';el.dataset.insertion=pos;
         const rec={rawStart:pos,rawEnd:pos+line.length,sourceStart:pos,sourceEnd:pos+line.length,map:[],formatPairs:[]};
         const note=this.notes.some(([a,b])=>pos>=a&&pos+line.length<=b);
         const block={el,rec,units:new Map(),generated:'',signature:null,hidden:note};
-        this.placeSlot(el,pos,previous,next);this.liveBlocks.push(block);
-    });
-    this.liveBlocks.sort((a,b)=>a.rec.rawStart-b.rec.rawStart);this.updateLive(false);
-    if(this.selection){
-      this.restoreSelection(false);
-      this.keepBlockAt(anchor);this.revealCaret();
-      this.onSelection({...this.selection},this.getSnapshot()?.version);
-      this.updateBlankCaret();
+        this.placeSlot(el,pos,covered);this.liveBlocks.push(block);
+      }pos+=line.length+1;
     }
+    this.liveBlocks.sort((a,b)=>a.rec.rawStart-b.rec.rawStart);this.updateLive(false);
+    if(this.selection)this.restoreSelection();
   }
   syncSelection(){
     if(!this.full()||this.composing||this.updatingLive)return;const s=this.readSelection();if(!s)return;this.selection=s;
     if(!this.dragging)this.updateLive();
-    this.updateBlankCaret();
     this.onSelection({...this.selection},this.getSnapshot()?.version);
   }
-  clearSelection(){this.selection=null;this.lastRestored=null;this.hideBlankCaret();if(this.live()&&!this.composing)this.updateLive(false);}
+  clearSelection(){this.selection=null;this.lastRestored=null;if(this.live()&&!this.composing)this.updateLive(false);}
   updateLive(restore=true){
     if(!this.enabled||this.composing||!this.liveBlocks||this.updatingLive)return;
     this.updatingLive=true;const source=this.input.value,win=this.doc.defaultView,scroll=win.scrollY;
@@ -214,51 +171,6 @@ export class PreviewEditor{
     this.updatingLive=false;
   }
   caretRect(){const s=this.doc.getSelection();if(!s?.focusNode||!this.main.contains(s.focusNode))return null;const range=this.doc.createRange();range.setStart(s.focusNode,s.focusOffset);range.collapse(true);return range.getBoundingClientRect?.();}
-  hideBlankCaret(){
-    this.blankCaret.hidden=true;
-    this.main.classList.remove('preview-blank-active');
-  }
-  updateBlankCaret(){
-    if(!this.enabled||this.composing||this.doc.activeElement!==this.main){this.hideBlankCaret();return;}
-    const selection=this.readSelection();
-    if(!selection||selection.anchor!==selection.focus){this.hideBlankCaret();return;}
-    const source=this.input.value,pos=selection.focus;
-    const start=pos===0?0:source.lastIndexOf('\n',pos-1)+1;
-    const newline=source.indexOf('\n',pos),end=newline<0?source.length:newline;
-    if(source.slice(start,end).trim()){this.hideBlankCaret();return;}
-    const focus=this.doc.getSelection()?.focusNode;
-    const element=focus?.nodeType===1?focus:focus?.parentElement;
-    let rect=this.caretRect();
-    if(!rect?.height){
-      rect=element?.getBoundingClientRect();
-    }
-    if(!rect?.height||rect.bottom<=0||rect.top>=this.doc.defaultView.innerHeight){this.hideBlankCaret();return;}
-    const {left,top,height}=rect;
-    Object.assign(this.blankCaret.style,{left:left+'px',top:top+'px',height:height+'px'});
-    this.blankCaret.hidden=false;
-    this.main.classList.add('preview-blank-active');
-  }
-  captureBlockAnchor(){
-    if(!this.enabled)return null;
-    const focus=this.doc.getSelection()?.focusNode;
-    const element=focus?.nodeType===1?focus:focus?.parentElement;
-    const block=element?.closest('[data-token],[data-insertion]');
-    if(!block)return null;
-    const snapshot=this.getSnapshot();
-    if(!snapshot)return null;
-    const {records,version}=snapshot;
-    const source=block.dataset.insertion!==undefined?Number(block.dataset.insertion):records.get(block.dataset.token)?.rawStart;
-    const pos=this.edits.map(source,version);
-    return pos===null?null:{pos,top:block.getBoundingClientRect().top,slot:block.hasAttribute('data-insertion')};
-  }
-  keepBlockAt(anchor){
-    if(!anchor)return;
-    const block=this.liveBlocks.find(b=>b.rec.rawStart===anchor.pos)||
-      (!anchor.slot&&this.liveBlocks.find(b=>b.rec.rawStart<anchor.pos&&anchor.pos<=b.rec.rawEnd));
-    if(!block)return;
-    const shift=block.el.getBoundingClientRect().top-anchor.top;
-    if(Math.abs(shift)>1)this.doc.defaultView.scrollBy(0,shift);
-  }
   revealCaret(){const rect=this.caretRect(),win=this.doc.defaultView;if(rect?.height){if(rect.top<12)win.scrollBy(0,rect.top-12);else if(rect.bottom>win.innerHeight-12)win.scrollBy(0,rect.bottom-win.innerHeight+12);}}
   boundary(node,offset){
     if(!node||!this.main.contains(node))return null;
@@ -280,7 +192,6 @@ export class PreviewEditor{
     const a=nearest(this.selection.anchor),f=nearest(this.selection.focus);this.main.focus({preventScroll:true});this.doc.getSelection().setBaseAndExtent(a.node,a.offset,f.node,f.offset);
     this.lastRestored={a,f,selection:{...this.selection}};
     if(reveal){this.revealCaret();this.onSelection({...this.selection},this.getSnapshot()?.version);}
-    this.updateBlankCaret();
   }
   insert(text,type='insertText',selection=this.readSelection()||this.selection,version=this.getSnapshot()?.version){
     if(!selection)return;let a=this.edits.map(Math.min(selection.anchor,selection.focus),version),b=this.edits.map(Math.max(selection.anchor,selection.focus),version);

@@ -40,20 +40,19 @@ test('editing preview hides the entire note-only line without eating a real blan
   assert.equal(a.main.querySelector('.dialogue').textContent,'새 첫 대사\n  \n둘째 대사');
   a.close();
 });
-test('a visible blank line gets a non-printing caret that vanishes after typing',()=>{
+test('restored editor uses a native selection on a real blank line, without a second caret overlay',()=>{
   const a=app('첫 줄\n\n다음 문단','source');
   a.main.tabIndex=-1;
   a.dom.window.Range.prototype.getBoundingClientRect=()=>({left:96,top:50,bottom:73,height:23});
   const pos='첫 줄\n'.length;
   a.select(pos);
-  const caret=a.doc.querySelector('#preview-blank-caret');
-  assert.equal(caret.hidden,false);
-  assert.equal(caret.getAttribute('aria-hidden'),'true');
-  assert.equal(caret.style.height,'23px');
-  assert.equal(a.main.classList.contains('preview-blank-active'),true);
+  assert.equal(a.doc.querySelector('#preview-blank-caret'),null);
+  const slot=a.doc.getSelection().focusNode.parentElement.closest('[data-insertion]');
+  assert.equal(Number(slot.dataset.insertion),pos);
+  assert.equal(a.editor.caretRect().height,23);
   a.type('입력');
   assert.equal(a.input.value,'첫 줄\n입력\n다음 문단');
-  assert.equal(caret.hidden,true);
+  assert.equal(a.doc.querySelector('#preview-blank-caret'),null);
   a.close();
 });
 for(const mode of ['source','full'])test(`${mode}: registered cue is inserted only on Enter and undone in one edit`,()=>{

@@ -3,9 +3,20 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {parse} from '../src/engine/fountain_parser.js';
 import {parseScreenplay,renderPreview} from '../src/screenplay.js';
-import {SourceEdits,mappedPosition,hitText,revealCaret,installPreviewNavigation,installSourceNavigation,visiblePreviewAnchor} from '../src/preview-navigation.js';
+import {SourceEdits,mappedPosition,hitText,revealCaret,installPreviewNavigation,installSourceNavigation,visiblePreviewAnchor,previewPositionForSource} from '../src/preview-navigation.js';
 
 function preview(source,names=[]){const elements=parseScreenplay(source,names);const dom=new JSDOM(renderPreview(elements));return {elements,dom,doc:dom.window.document};}
+
+test('source navigation resolves separator and trailing blank lines without jumping across hidden source',()=>{
+  const source='\n\n@민서\n반복 대사\n\n반복 대사\n\n\n[[숨김]]\n\n',p=preview(source),records=p.elements.navigation;
+  assert.equal(previewPositionForSource(records,0,source),2);
+  assert.equal(previewPositionForSource(records,source.indexOf('\n\n반복')+1,source),source.indexOf('\n\n반복'));
+  const second=source.lastIndexOf('반복 대사');
+  assert.equal(previewPositionForSource(records,second+6,source),second+5);
+  assert.equal(previewPositionForSource(records,source.length,source),null);
+  assert.equal(previewPositionForSource(records,-1,source),null);
+  p.dom.window.close();
+});
 function verifyMap(source,names=[]){
   const p=preview(source,names);
   for(const node of p.doc.querySelectorAll('[data-token]')){
