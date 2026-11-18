@@ -52,9 +52,13 @@ export function prepareSource(doc,names,settings){
     const numeric=cfg.numericScenes&&/^\d+\.\s+/.test(raw.trim());
     const scene=(hash||sn||numeric)?matchScene(raw):null;
     if(scene)text='.'+fountainRuns(sliceRuns(line.runs,scene.start,scene.end));
-    const cuePosition=index===0||!sourceLines[index-1].text.trim();
-    const char=matchCharacter(raw,cfg.autoCharacters&&cuePosition?names:[]);
-    if(char){if(plain){if(!char.explicit)text=raw.replace(/^(\s*)/,'$1@');}else{const start=raw.indexOf(raw.trim())+(char.explicit?1:0),end=raw.replace(/\s*\^\s*$/,'').trimEnd().length;text='@'+fountainRuns(sliceRuns(line.runs,start,end))+(char.dual?' ^':'');}}
+    // Only old rich-text backups need implicit cues converted during migration.
+    // A Fountain source string already records the user's choice to keep or remove @.
+    if(!plain){
+      const cuePosition=index===0||!sourceLines[index-1].text.trim();
+      const char=matchCharacter(raw,cfg.autoCharacters&&cuePosition?names:[]);
+      if(char){const start=raw.indexOf(raw.trim())+(char.explicit?1:0),end=raw.replace(/\s*\^\s*$/,'').trimEnd().length;text='@'+fountainRuns(sliceRuns(line.runs,start,end))+(char.dual?' ^':'');}
+    }
     return text;
   }).join('\n');
 }
@@ -63,10 +67,9 @@ const structural=new Set(['dialogue_begin','dialogue_end','dual_dialogue_begin',
 function preparedMap(original,prepared){
   const raw=original.split('\n'),lines=prepared.split('\n'),map=[];let offset=0;
   for(let i=0;i<lines.length;i++){
-    const a=raw[i]||'',b=lines[i],leading=a.length-a.trimStart().length,inserted=b===a.slice(0,leading)+'@'+a.slice(leading);
+    const a=raw[i]||'',b=lines[i];
     for(let j=0;j<b.length;j++){
       if(a===b)map.push([offset+j,offset+j+1]);
-      else if(inserted)map.push(j===leading?[offset+j,offset+j]:[offset+j-(j>leading?1:0),offset+j+1-(j>leading?1:0)]);
       else map.push(null); // Legacy-only transforms cannot safely identify a clicked character.
     }
     offset+=a.length;if(i<lines.length-1){map.push([offset,offset+1]);offset++;}

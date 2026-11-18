@@ -208,7 +208,10 @@ export class PreviewEditor{
     const result=replaceVisible(this.input.value,a,b,text,this.live()?[]:pairs,this.hiddenRanges());if(!result){this.notify('숨김 메모는 원본 화면에서 수정해 주세요.');this.refresh();return;}
     if(a===b&&(type==='insertParagraph'||type==='insertLineBreak')){
       const cue=this.cueAt(this.input.value,a);
-      if(cue!==null){result.text=result.text.slice(0,cue)+'@'+result.text.slice(cue);result.start++;result.end++;}
+      if(cue!==null){
+        result.text=this.input.value.slice(0,cue.from)+cue.insert+this.input.value.slice(cue.to);
+        result.start=result.end=cue.from+cue.insert.length;
+      }
     }
     this.input.setSelectionRange(a,b);this.remember();
     const lineStart=result.text.lastIndexOf('\n',Math.max(0,result.start-1))+1;

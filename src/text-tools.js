@@ -4,18 +4,24 @@ import {parse} from './engine/fountain_parser.js';
 export const normalizeNewlines=s=>s.replace(/\r\n?/g,'\n');
 export function cleanNames(value){return [...new Set(value.split(/[\n,]/).map(s=>s.trim().replace(/^@/,'')).filter(s=>s&&!/[\n^<>]/.test(s)))];}
 export function characterCueOnEnter(text,position,names){
-  if(!names.length||position<0||position>text.length||!/^\r?(?:\n|$)/.test(text.slice(position)))return null;
+  if(!names.length||position<0||position>text.length)return null;
+  const newline=text.indexOf('\n',position);
+  const end=newline===-1?text.length:newline-(text[newline-1]==='\r'?1:0);
+  if(position>end||text.slice(position,end).trim())return null;
   const start=position?text.lastIndexOf('\n',position-1)+1:0;
   const previousStart=start>1?text.lastIndexOf('\n',start-2)+1:0;
-  if(start&&text.slice(previousStart,start-1).trim())return null;
-  const line=text.slice(start,position);
-  const cue=matchCharacter(line,names);
-  if(!cue||cue.explicit||/^[ \t]*[.!#>~=]/.test(line))return null;
+  const previous=text.slice(previousStart,start-1).replace(/\r$/,'');
+  if(start&&(previous.trim()||previous==='  '))return null;
+  const line=text.slice(start,end).trim();
+  const cue=matchCharacter(line.normalize('NFC'),names.map(name=>name.normalize('NFC')));
+  if(!cue||cue.explicit||/^[.!#>~=]/.test(line))return null;
   const excluded=/\/\*[\s\S]*?(?:\*\/|$)|\[\[[\s\S]*?(?:\]\]|$)/g;
   for(const match of text.slice(0,position).matchAll(excluded)){
     if(match.index+match[0].length>start)return null;
   }
-  return start+line.search(/\S/);
+  // Padding around a converted cue can make Fountain parse it as an action.
+  const insert='@'+line.replace(/\s{2,}\^$/,' ^')+'\n';
+  return {from:start,to:end,insert};
 }
 
 export function normalizeText(text,names,settings){

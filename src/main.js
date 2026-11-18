@@ -313,10 +313,10 @@ installSourceNavigation({input,isComposing:()=>composing||previewEditor.busy(),o
 input.addEventListener('beforeinput',event=>{
   if(event.inputType==='historyUndo'||event.inputType==='historyRedo'){event.preventDefault();restoreHistory(event.inputType==='historyUndo'?-1:1);return;}
   if(history[historyIndex]?.text===input.value)history[historyIndex]=snapshot();
-  if(!composing&&!event.isComposing&&event.inputType==='insertLineBreak'&&state.settings.autoCharacters&&input.selectionStart===input.selectionEnd){
+  if(!composing&&!event.isComposing&&['insertLineBreak','insertParagraph'].includes(event.inputType)&&state.settings.autoCharacters&&input.selectionStart===input.selectionEnd){
     const pos=input.selectionEnd,cue=characterCueOnEnter(input.value,pos,state.names);
     if(cue!==null){
-      event.preventDefault();input.setRangeText('\n',pos,pos,'end');input.setRangeText('@',cue,cue,'preserve');
+      event.preventDefault();input.setRangeText(cue.insert,cue.from,cue.to,'end');
       normalize();record('insertLineBreak');changed();revealCaret(input,input.selectionEnd);
     }
   }

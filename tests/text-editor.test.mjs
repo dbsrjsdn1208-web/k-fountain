@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
-import {cleanNames,normalizeText,mapSelection,toggleMarkup,clipboardFountain,migrateLegacy} from '../src/text-tools.js';
+import {characterCueOnEnter,cleanNames,normalizeText,mapSelection,toggleMarkup,clipboardFountain,migrateLegacy} from '../src/text-tools.js';
 import {parseScreenplay,renderPreview,exportReadableText,DEFAULT_SETTINGS,plainTextDoc} from '../src/screenplay.js';
 import {FileSession} from '../src/file-store.js';
 const dom=new JSDOM(),paste=(plain,html)=>clipboardFountain(plain,html,dom.window.DOMParser);
@@ -63,8 +63,19 @@ test('selection follows @ insertion and remains before automatically appended nu
 });
 test('registered wrapped and literal parenthesized names support extensions and dual dialogue',()=>{
   assert.deepEqual(cleanNames('(인물)\n민서\n민서'),['(인물)','민서']);
-  const text='(인물) (전화)\n대사\n\n(민서) ^\n(작게)\n다음 대사';
-  const e=parseScreenplay(text,['(인물)','민서']);assert.equal(e.model.tokens.filter(t=>t.type==='character').length,2);assert.equal(e.model.tokens.filter(t=>t.type==='parenthetical').length,1);assert.match(renderPreview(e),/dual-dialogue-block/);
+  const names=['(인물)','민서'];
+  const left=characterCueOnEnter('(인물) (전화)',9,names);
+  const text=left.insert+'대사\n\n';
+  const right=characterCueOnEnter(text+'(민서) ^',text.length+6,names);
+  const withDual=text+right.insert+'(작게)\n다음 대사';
+  const e=parseScreenplay(withDual,names);assert.equal(e.model.tokens.filter(t=>t.type==='character').length,2);assert.equal(e.model.tokens.filter(t=>t.type==='parenthetical').length,1);assert.match(renderPreview(e),/dual-dialogue-block/);
+});
+test('Enter recognizes equivalent Hangul without rewriting letters and ignores dialogue continuation',()=>{
+  const cue='석필'.normalize('NFD');
+  assert.deepEqual(characterCueOnEnter(cue,cue.length,['석필']),{from:0,to:cue.length,insert:'@'+cue+'\n'});
+  const dialogue='@민서\n대사\n  \n석필';
+  assert.equal(characterCueOnEnter(dialogue,dialogue.length,['석필']),null);
+  assert.equal(characterCueOnEnter('석필수',2,['석필']),null);
 });
 test('a registered parenthetical inside dialogue is still a direction',()=>{
   const text='@민서\n(인물)\n대사';assert.equal(normalizeText(text,['민서','(인물)'],DEFAULT_SETTINGS),text);

@@ -28,6 +28,23 @@ test('textarea shortcuts, undo, selection and IME compose through actual app lis
     await a.flush();assert.deepEqual(a.errors,[]);
   }finally{a.dom.window.close();}
 });
+test('registered name with pasted padding converts on Enter and stays plain after @ is removed',async()=>{
+  const a=await app();try{
+    const names=a.q('#names');names.value='석필';names.dispatchEvent(new a.w.Event('input'));
+    a.edit('  석필 (전화)  ');const pos=a.input.value.trimEnd().length;
+    a.input.setSelectionRange(pos,pos);
+    const enter=new a.w.InputEvent('beforeinput',{inputType:'insertParagraph',bubbles:true,cancelable:true});
+    assert.equal(a.input.dispatchEvent(enter),false);assert.equal(a.input.value,'@석필 (전화)\n');
+    assert.equal(a.input.selectionStart,a.input.value.length);
+    a.input.dispatchEvent(new a.w.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));
+    assert.equal(a.input.value,'  석필 (전화)  ');
+    a.edit('@석필 (전화)\n안녕');await a.flush();
+    const doc=a.q('#preview').contentDocument;assert.equal(doc.querySelector('.character').textContent,'석필 (전화)');
+    a.edit('석필 (전화)\n안녕','deleteContentForward');await a.flush();
+    assert.equal(doc.querySelector('.character'),null);
+    a.q('#save').click();await a.flush();assert.deepEqual(a.writes,['석필 (전화)\n안녕']);
+  }finally{a.dom.window.close();}
+});
 test('settings apply live, source numbering keeps insertion caret and output mode preserves source',async()=>{
   const a=await app();try{
     a.q('#number-mode').value='source';a.q('#number-mode').dispatchEvent(new a.w.Event('change'));

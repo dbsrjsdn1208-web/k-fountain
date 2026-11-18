@@ -44,8 +44,8 @@ test('hiding note-only dialogue lines keeps intentional breaks and exact source 
   assert.match(renderPreview(p.elements,{showNotes:true}),/비공개/);
   p.dom.window.close();
 });
-test('dual dialogue, titles, lyrics, centered lines and registered cues carry ranges',()=>{
-  verifyMap('Title: **작품**\nAuthor: 저자\n\n.방 #7#\n\n민서 (전화)\n안녕\n둘째 줄\n\n(인물) ^\n(작게)\n안녕\n\n~노래\n~다음\n\n>가운데<\n>둘째<',['민서','(인물)']).dom.window.close();
+test('dual dialogue, titles, lyrics, centered lines and explicit cues carry ranges',()=>{
+  verifyMap('Title: **작품**\nAuthor: 저자\n\n.방 #7#\n\n@민서 (전화)\n안녕\n둘째 줄\n\n@(인물) ^\n(작게)\n안녕\n\n~노래\n~다음\n\n>가운데<\n>둘째<').dom.window.close();
 });
 test('comments and CRLF preserve original offsets',()=>{
   const source='/* 긴 주석\r\n여러 줄 */\r\n\r\n@민서\r\n안녕\r\n(잠깐)\r\n안녕';
