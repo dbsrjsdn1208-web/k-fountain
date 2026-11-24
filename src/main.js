@@ -35,6 +35,7 @@ let history=[],historyIndex=-1,lastEditTime=0,lastEditType='',installPrompt;
 let previewEditor,viewControls,sceneOutline,outlineVersion,lastPane='source',lastPreviewSelection=null;
 let typewriterFrame=0;
 let pausedPreview=null;
+let openingFile=false;
 document.querySelector('#app').innerHTML=`
 <header id="header-panel"><div class="title">K-파운틴</div><button id="install" hidden>앱 설치</button></header>
 <div id="top-panel">
@@ -355,25 +356,53 @@ async function saveFile(as=false){
     dirty=input.value!==files.lastSaved;updateStatus();saveRecovery();return true;
   }catch(error){if(error.name!=='AbortError')toast('저장하지 못했습니다. '+error.message);return false;}
 }
-async function confirmReplace(){
+async function confirmReplace({reload=false}={}){
   if(files.busy){toast('저장이 진행 중입니다. 완료 후 문서를 바꿔 주세요.');return false;}
   if(!previewEditor.finish())return false;
   if(!dirty&&files.lastSaved!==null)return true;
-  const dialog=$('#replace-dialog');dialog.returnValue='cancel';dialog.showModal();
+  const dialog=$('#replace-dialog');
+  dialog.querySelector('h2').textContent=reload?'이 파일을 다시 열까요?':'현재 원고를 닫을까요?';
+  dialog.querySelector('p').textContent=reload
+    ?'현재 편집본을 복구 기록에 보관하고 파일의 최신 내용을 불러옵니다.'
+    :'파일에 저장하지 않은 변경 내용이 있습니다.';
+  dialog.querySelector('[data-decision="discard"]').textContent=reload?'파일에서 다시 열기':'저장하지 않고 계속';
+  dialog.querySelector('[data-decision="save"]').hidden=reload;
+  dialog.returnValue='cancel';dialog.showModal();
   const decision=await new Promise(resolve=>dialog.addEventListener('close',()=>resolve(dialog.returnValue),{once:true}));
-  return decision==='discard'||decision==='save'&&await saveFile();
+  if(decision==='discard')return true;
+  if(decision!=='save'||reload)return false;
+  if(!await saveFile())return false;
+  if(dirty){toast('저장 중 새로 입력한 내용이 있어 현재 원고를 유지합니다.');return false;}
+  return true;
 }
 document.querySelectorAll('[data-decision]').forEach(b=>b.onclick=()=>$('#replace-dialog').close(b.dataset.decision));
 function setDocument(next,handle=null,saved=null){if(files.busy)throw Error('저장이 진행 중입니다. 완료 후 문서를 바꿔 주세요.');const validated=validate(next);if(input.value)preserveRecovery({title:state.title,text:input.value});state=validated;input.value=state.text;sourceEdits.reset(input.value);lastPreviewSelection=null;navigationSnapshot=null;files.handle=handle;files.lastSaved=saved;dirty=saved!==input.value;$('#title').value=state.title;resetHistory();previewText=null;syncSettings();changed();input.scrollTop=0;frame.contentWindow.scrollTo(0,0);if(handle)handleDB('put',handle).catch(()=>{});else handleDB('delete').catch(()=>{});}
-async function load(file,text,handle=null){
-  if(file.size>10*1024*1024)throw Error('10MB 이하의 파일을 선택해 주세요.');
-  const next=/\.json$/i.test(file.name)?validate(JSON.parse(text)):{...state,text:normalizeNewlines(text),title:file.name.replace(/\.[^.]+$/,'')};
-  if(await confirmReplace())setDocument(next,handle,handle?normalizeNewlines(text):null);
+async function load(file,handle=null){
+  if(openingFile){toast('파일을 여는 중입니다. 완료 후 다시 시도해 주세요.');return;}
+  openingFile=true;
+  try{
+    const reload=!!(handle&&files.handle&&(
+      handle===files.handle||typeof handle.isSameEntry==='function'&&await handle.isSameEntry(files.handle)
+    ));
+    if(!await confirmReplace({reload}))return;
+    const version=sourceEdits.version;
+    const latest=handle?await handle.getFile():file;
+    if(latest.size>10*1024*1024)throw Error('10MB 이하의 파일을 선택해 주세요.');
+    const text=await latest.text();
+    if(version!==sourceEdits.version||files.busy||composing||previewEditor.busy()){
+      toast('파일을 읽는 동안 원고가 변경됐습니다. 파일 열기를 다시 실행해 주세요.');
+      return;
+    }
+    const next=/\.json$/i.test(latest.name)?validate(JSON.parse(text)):{
+      ...state,text:normalizeNewlines(text),title:latest.name.replace(/\.[^.]+$/,''),
+    };
+    setDocument(next,handle,normalizeNewlines(text));
+  }finally{openingFile=false;}
 }
-$('#open').onclick=async()=>{try{if(window.showOpenFilePicker){const picked=await files.open();await load(picked.file,picked.text,picked.handle);}else $('#file-input').click();}catch(e){if(e.name!=='AbortError')toast(e.message);}};
-$('#file-input').onchange=async event=>{try{const file=event.target.files[0];if(file)await load(file,await file.text());}catch(e){toast(e.message);}event.target.value='';};
+$('#open').onclick=async()=>{try{if(window.showOpenFilePicker){const handle=await files.open();await load(null,handle);}else $('#file-input').click();}catch(e){if(e.name!=='AbortError')toast(e.message);}};
+$('#file-input').onchange=async event=>{try{const file=event.target.files[0];if(file)await load(file);}catch(e){toast(e.message);}event.target.value='';};
 input.addEventListener('dragover',e=>e.preventDefault());
-input.addEventListener('drop',async e=>{if(!e.dataTransfer.files.length)return;e.preventDefault();try{const file=e.dataTransfer.files[0];await load(file,await file.text());}catch(error){toast(error.message);}});
+input.addEventListener('drop',async e=>{if(!e.dataTransfer.files.length)return;e.preventDefault();try{const file=e.dataTransfer.files[0];await load(file);}catch(error){toast(error.message);}});
 $('#new').onclick=async()=>{try{if(await confirmReplace()){setDocument({...state,text:'',title:'제목 없는 시나리오'});input.focus();}}catch(e){toast(e.message);}};
 $('#save').onclick=()=>saveFile();$('#save-as').onclick=()=>saveFile(true);
 $('#title').oninput=e=>{state.title=e.target.value;updateStatus();queueRecovery();};

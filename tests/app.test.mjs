@@ -128,10 +128,79 @@ test('new document detaches the previous destination and saves with a fresh pick
  a.edit('새 원고');await a.q('#save').onclick();assert.equal(a.picks,before+1);assert.equal(JSON.parse(a.w.localStorage.getItem('k-fountain.history.v1'))[0].text,'이전 원고');
  }finally{a.dom.window.close();}
 });
+
+test('reopening the same external file reads the latest disk contents and never saves over them',async()=>{
+  const a=await app();
+  try{
+    let disk='처음 파일',reads=0;
+    const makeHandle=()=>({
+      name:'external.fountain',
+      async isSameEntry(){return true;},
+      async getFile(){
+        reads++;
+        const text=disk;
+        return {name:'external.fountain',size:text.length,text:async()=>text};
+      },
+      async createWritable(){throw Error('reopening must not write');},
+    });
+    a.w.showOpenFilePicker=async()=>[makeHandle()];
+    const opening=a.q('#open').onclick();
+    await a.flush();a.q('[data-decision="discard"]').click();await opening;
+    assert.equal(a.input.value,'처음 파일');
+    a.edit('앱 안의 미저장 수정');
+    disk='외부 편집기의 첫 수정';
+    const reopening=a.q('#open').onclick();await a.flush();
+    assert.match(a.q('#replace-dialog').textContent,/다시 열/);
+    assert.equal(a.q('[data-decision="save"]').hidden,true);
+    disk='확인 창이 열린 동안의 최종 외부 수정';
+    a.q('[data-decision="discard"]').click();await reopening;await a.flush();
+    assert.equal(a.input.value,disk);
+    assert.match(a.q('#preview').contentDocument.querySelector('main').textContent,/최종 외부 수정/);
+    assert.ok(JSON.parse(a.w.localStorage.getItem('k-fountain.history.v1')).some(entry=>entry.text==='앱 안의 미저장 수정'));
+    assert.equal(reads,2);
+    assert.deepEqual(a.writes,[]);
+    assert.deepEqual(a.errors,[]);
+  }finally{a.dom.window.close();}
+});
 test('changing the title requests a new destination instead of silently overwriting',async()=>{
  const a=await app();try{a.edit('이전 원고');await a.q('#save').onclick();const before=a.picks;
  a.q('#title').value='?';a.q('#title').dispatchEvent(new a.w.Event('input'));a.edit('다른 내용');await a.q('#save').onclick();assert.equal(a.picks,before+1);
  }finally{a.dom.window.close();}
+});
+
+test('file reads that fail or finish after a new edit preserve the current manuscript',async()=>{
+  const a=await app();
+  try{
+    a.edit('보관할 원고');await a.q('#save').onclick();
+    a.w.showOpenFilePicker=async()=>[{async getFile(){throw Error('파일을 읽지 못했습니다');}}];
+    await a.q('#open').onclick();
+    assert.equal(a.input.value,'보관할 원고');assert.match(a.q('#toast').textContent,/읽지 못/);
+    let finishRead;
+    a.w.showOpenFilePicker=async()=>[{
+      async getFile(){return {name:'slow.fountain',size:10,text:()=>new Promise(resolve=>finishRead=resolve)};},
+    }];
+    const opening=a.q('#open').onclick();await a.flush();
+    a.edit('읽는 동안 새로 쓴 원고');finishRead('뒤늦게 읽은 파일');await opening;
+    assert.equal(a.input.value,'읽는 동안 새로 쓴 원고');
+    assert.match(a.q('#toast').textContent,/읽는 동안/);
+  }finally{a.dom.window.close();}
+});
+
+test('fallback input reopens the same filename and reflects the newly selected bytes',async()=>{
+  const a=await app();
+  try{
+    a.edit('보관할 원고');await a.q('#save').onclick();
+    async function choose(text){
+      const picker=a.q('#file-input');
+      Object.defineProperty(picker,'files',{configurable:true,value:[{name:'same.fountain',size:text.length,text:async()=>text}]});
+      await picker.onchange({target:picker});
+      assert.equal(picker.value,'');
+    }
+    await choose('외부 첫 수정');assert.equal(a.input.value,'외부 첫 수정');
+    await choose('외부 두 번째 수정');await a.flush();
+    assert.equal(a.input.value,'외부 두 번째 수정');
+    assert.match(a.q('#preview').contentDocument.querySelector('main').textContent,/외부 두 번째 수정/);
+  }finally{a.dom.window.close();}
 });
 test('new document cannot replace the manuscript while a save picker is pending',async()=>{
  const a=await app();try{a.edit('저장 중 원고');let release;a.w.showSaveFilePicker=()=>new Promise(resolve=>release=resolve);

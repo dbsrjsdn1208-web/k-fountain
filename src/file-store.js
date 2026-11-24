@@ -3,7 +3,7 @@ export class FileSession {
   get supported(){return typeof this.api.showSaveFilePicker==='function';}
   async open(){
     const [handle]=await this.api.showOpenFilePicker({types:[{description:'Fountain 원고',accept:{'text/plain':['.fountain','.txt']}}],multiple:false});
-    const file=await handle.getFile();return {handle,file,text:await file.text()};
+    return handle;
   }
   async save(text,name,as=false,source=text){
     if(this.busy)throw Error('이전 저장이 끝난 뒤 다시 시도해 주세요.');
